@@ -1,20 +1,27 @@
 const express = require('express');
 const helmet = require('helmet');
-const xss = require('xss-clean');
 const rateLimit = require('express-rate-limit');
 const cors = require('cors');
+const path = require('path'); // Nécessaire pour les chemins de fichiers
 require('dotenv').config();
 
 // Vérification de la connexion DB dès le lancement
-const db = require('./shares/database/config');
+const pool = require('./shared/database/config');
 
 const app = express();
 
 // --- SÉCURITÉ ET MIDDLEWARES ---
 
+// 1. Protection des en-têtes HTTP
 app.use(helmet());
+
+// 2. Autorise les requêtes depuis ton futur Front-end
 app.use(cors());
+
+// 3. Analyse du JSON (limité à 10kb pour éviter les surcharges)
 app.use(express.json({ limit: '10kb' }));
+
+// 4. Nettoyage contre les injections de scripts (XSS)
 app.use(xss());
 
 const limiter = rateLimit({
@@ -26,21 +33,21 @@ app.use('/api', limiter);
 
 // --- ROUTES ---
 
-// Route de santé (Health Check)
 app.get('/api/v1/health', (req, res) => {
   res.status(200).json({ status: 'success', message: 'API opérationnelle' });
 });
 
-// --- GESTION DES ERREURS 404 (Version Express 5) ---
-// On utilise '/*' au lieu de '*' pour éviter l'erreur PathError
-app.all(/.*/, (req, res) => {
+// app.use('/api/v1/escorts', escortRoutes);
+// app.use('/api/v1/admins', adminRoutes);
+
+// --- GESTION DES ERREURS 404 ---
+app.all('*', (req, res) => {
   res.status(404).json({
     status: 'fail',
     message: `Impossible de trouver ${req.originalUrl} sur ce serveur.`
   });
 });
 
-// --- LANCEMENT ---
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Serveur démarré sur le port ${PORT}`);

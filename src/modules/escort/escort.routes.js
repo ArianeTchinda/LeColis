@@ -12,4 +12,6 @@ router.post('/register',
   escortController.registerEscort
 );
 
+router.post('/login', escortController.loginEscort);
+
 module.exports = router;

@@ -83,7 +83,7 @@ CREATE TABLE notification (
     message TEXT,
     id_escort INTEGER REFERENCES escort(id) ON DELETE CASCADE,
     id_admin INTEGER REFERENCES admin(id) ON DELETE SET NULL
-);
+);  
 
 -- Phase 4 : Contenu lié aux publications
 CREATE TABLE media (

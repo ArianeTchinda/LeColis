@@ -34,6 +34,7 @@ CREATE TABLE escort (
     description TEXT,
     telephone VARCHAR(30),
     mail VARCHAR(150) UNIQUE,
+    profile_picture VARCHAR(255),
     password TEXT NOT NULL,
     status VARCHAR(50),
     -- On stocke ici uniquement les URLs des images

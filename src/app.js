@@ -16,6 +16,7 @@ const app = express();
 // Modifie Helmet pour autoriser l'affichage des images en local
 app.use(helmet({ crossOriginResourcePolicy: false })); 
 app.use(cors());
+app.use(express.static('public'));
 
 // ATTENTION : express.json() doit être AVANT les routes, 
 // mais Multer gère le multipart tout seul. 10kb est un peu serré si tu reçois de longs textes.

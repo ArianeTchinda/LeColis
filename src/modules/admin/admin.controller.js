@@ -1,4 +1,4 @@
-const db = require('../../shared/database');
+const db = require('../../shares/database/config');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 

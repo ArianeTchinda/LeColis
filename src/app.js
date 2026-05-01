@@ -42,6 +42,10 @@ io.on('connection', (socket) => {
     console.log('🛡️  Un admin a rejoint la room');
   });
 
+  socket.on('join_escort_room', (escortId) => {
+    socket.join(`escort_${escortId}`);
+    console.log(`Escorte ${escortId} écoute ses notifications`);
+  });
   socket.on('disconnect', () => {
     console.log('❌ Utilisateur déconnecté');
   });
@@ -58,18 +62,35 @@ app.use('/api', limiter);
 // --- ROUTES ---
 
 // Import des routes (Une fois que tu les auras créées)
-const adminRoutes = require('./src/modules/admin/admin.routes');
-const signalisationRoutes = require('./src/modules/signalisation/signalisation.routes');
+const adminRoutes = require('./modules/admin/admin.routes');
+const signalisationRoutes = require('./modules/signalisation/signalisation.routes');
+const notificationRoutes = require('./modules/notification/notification.routes');
+const escortRoutes = require('./modules/escort/escort.routes');
+const avisRoutes = require('./modules/avis/avis.routes');
 
-app.use('/api/v1/admins', adminRoutes);
-app.use('/api/v1/signalisation', signalisationRoutes);
+
+// --- ROUTES ---
+
+console.log('Vérification des chargements :');
+console.log('- Admin:', typeof adminRoutes);
+console.log('- Signalisation:', typeof signalisationRoutes);
+console.log('- Notification:', typeof notificationRoutes);
+console.log('- Escort:', typeof escortRoutes);
+console.log('- Avis:', typeof avisRoutes);
+
+// Utilisation sécurisée pour identifier la ligne exacte du crash
+try { app.use('/api/v1/escorts', escortRoutes); } catch(e) { console.error('Crash sur Escorts'); }
+try { app.use('/api/v1/avis', avisRoutes); } catch(e) { console.error('Crash sur Avis'); }
+try { app.use('/api/v1/admins', adminRoutes); } catch(e) { console.error('Crash sur Admins'); }
+try { app.use('/api/v1/signalisation', signalisationRoutes); } catch(e) { console.error('Crash sur Signalisation'); }
+try { app.use('/api/v1/notifications', notificationRoutes); } catch(e) { console.error('Crash sur Notifications'); }
 
 app.get('/api/v1/health', (req, res) => {
   res.status(200).json({ status: 'success', message: 'API opérationnelle' });
 });
 
 // --- GESTION DES ERREURS 404 ---
-app.all('*', (req, res) => {
+app.use((req, res) => {
   res.status(404).json({
     status: 'fail',
     message: `Impossible de trouver ${req.originalUrl} sur ce serveur.`

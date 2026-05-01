@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const adminController = require('./admin.controller');
-const protectAdmin = require('../../shared/middleware/authAdmin');
+const protectAdmin = require('../../shares/middleware/authadmin');
 
 // --- Routes Publiques (Accessibles par la page front Admin) ---
 router.post('/register', adminController.registerAdmin);

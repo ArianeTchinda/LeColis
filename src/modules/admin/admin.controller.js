@@ -103,7 +103,7 @@ const claimReport = async (req, res) => {
 
     // --- LOGIQUE TEMPS RÉEL ---
     // On prévient tous les admins que ce signalement n'est plus disponible
-    req.io.to('admins').emit('report_claimed', {
+    req.io.to('admins_room').emit('report_claimed', {
       id_signalement: id_signalement,
       par_admin: req.user.nom
     });

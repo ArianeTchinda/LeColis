@@ -2,37 +2,33 @@ const db = require('../../shares/database/config');
 
 const addAvis = async (req, res) => {
   try {
-    const { id_escort, note, commentaire } = req.body;
+    // 1. On récupère les noms exacts de ton schéma
+    const { id_escort, rate, message } = req.body;
 
-    // 1. Validation stricte
-    if (!id_escort || !note) {
+    // 2. Validation
+    if (!id_escort || rate === undefined) {
       return res.status(400).json({ 
         status: 'error', 
-        message: "L'ID de l'escorte et une note (1-5) sont obligatoires." 
+        message: "L'ID de l'escorte et une note (rate) sont obligatoires." 
       });
     }
 
-    if (note < 1 || note > 5) {
-      return res.status(400).json({ status: 'error', message: "La note doit être comprise entre 1 et 5." });
-    }
-
-    // 2. Insertion en base de données
+    // 3. Requête SQL avec tes noms de colonnes : message, rate, id_escort
     const query = `
-      INSERT INTO avis (id_escort, note, commentaire)
+      INSERT INTO avis (id_escort, rate, message)
       VALUES ($1, $2, $3)
-      RETURNING id, id_escort, note, commentaire, date_publication;
+      RETURNING *;
     `;
     
-    const result = await db.query(query, [id_escort, note, commentaire]);
+    const result = await db.query(query, [id_escort, rate, message]);
 
     res.status(201).json({
       status: 'success',
-      message: "Merci ! Votre avis a été publié.",
       data: result.rows[0]
     });
 
   } catch (error) {
-    console.error("Erreur addAvis:", error);
+    console.error("❌ Erreur addAvis:", error.message);
     res.status(500).json({ status: 'error', message: "Erreur lors de l'ajout de l'avis." });
   }
 };
@@ -46,7 +42,7 @@ const getAvisByEscort = async (req, res) => {
       SELECT 
         *, 
         COUNT(*) OVER() as total_avis,
-        AVG(note) OVER() as note_moyenne
+        AVG(rate) OVER() as note_moyenne
       FROM avis 
       WHERE id_escort = $1
       ORDER BY date_publication DESC;

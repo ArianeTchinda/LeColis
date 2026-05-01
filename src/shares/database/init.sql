@@ -3,6 +3,7 @@ CREATE TABLE admin (
     id SERIAL PRIMARY KEY,
     nom VARCHAR(100),
     prenom VARCHAR(100),
+    email VARCHAR(255) UNIQUE NOT NULL,
     password TEXT NOT NULL
 );
 

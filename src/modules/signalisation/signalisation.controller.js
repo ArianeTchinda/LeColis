@@ -4,16 +4,6 @@ const createSignalement = async (req, res) => {
   try {
     const { raison, id_escort } = req.body;
 
-    // Validation
-    if (!raison || !id_escort) {
-      return res.status(400).json({ 
-        status: 'error', 
-        message: "La raison et l'ID de l'escorte sont obligatoires." 
-      });
-    }
-
-    // On insère uniquement raison et id_escort. 
-    // id_admin reste NULL par défaut (attente de traitement).
     const query = `
       INSERT INTO signalisation (raison, id_escort)
       VALUES ($1, $2)
@@ -21,16 +11,20 @@ const createSignalement = async (req, res) => {
     `;
     
     const result = await db.query(query, [raison, id_escort]);
+    const newSignalement = result.rows[0];
 
-    res.status(201).json({
-      status: 'success',
-      message: "Signalement enregistré avec succès.",
-      data: result.rows[0]
+    // --- LOGIQUE TEMPS RÉEL ---
+    // On envoie le signalement à tous les admins connectés
+    req.io.to('admins').emit('new_signalement', {
+      message: "🚨 Nouveau signalement reçu !",
+      data: newSignalement
     });
+    // --------------------------
+
+    res.status(201).json({ status: 'success', data: newSignalement });
 
   } catch (error) {
-    console.error("Erreur Signalement:", error);
-    res.status(500).json({ status: 'error', message: "Erreur lors de la création du signalement." });
+    res.status(500).json({ status: 'error', message: error.message });
   }
 };
 

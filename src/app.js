@@ -1,44 +1,72 @@
 const express = require('express');
+const http = require('http'); // AJOUTÉ
+const { Server } = require('socket.io');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const cors = require('cors');
-const path = require('path'); // Nécessaire pour les chemins de fichiers
 require('dotenv').config();
 
-// Vérification de la connexion DB dès le lancement
-const pool = require('./shared/database/config');
-
+// Initialisation Express
 const app = express();
+
+// CRÉATION DU SERVEUR HTTP (Indispensable pour Socket.io)
+const server = http.createServer(app); 
+
+// INITIALISATION SOCKET.IO
+const io = new Server(server, {
+  cors: {
+    origin: "*", 
+    methods: ["GET", "POST"]
+  }
+});
 
 // --- SÉCURITÉ ET MIDDLEWARES ---
 
-// 1. Protection des en-têtes HTTP
 app.use(helmet());
-
-// 2. Autorise les requêtes depuis ton futur Front-end
 app.use(cors());
-
-// 3. Analyse du JSON (limité à 10kb pour éviter les surcharges)
 app.use(express.json({ limit: '10kb' }));
 
-// 4. Nettoyage contre les injections de scripts (XSS)
-app.use(xss());
 
+// Rendre "io" accessible dans tous tes controllers via req.io
+app.use((req, res, next) => {
+  req.io = io;
+  next();
+});
+
+// LOGIQUE SOCKET.IO
+io.on('connection', (socket) => {
+  console.log('🔌 Un utilisateur connecté:', socket.id);
+
+  socket.on('join_admin_room', () => {
+    socket.join('admins');
+    console.log('🛡️  Un admin a rejoint la room');
+  });
+
+  socket.on('disconnect', () => {
+    console.log('❌ Utilisateur déconnecté');
+  });
+});
+
+// LIMITER LE NOMBRE DE REQUÊTES
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, 
   max: 100, 
-  message: "Trop de tentatives. Réessayez dans 15 minutes."
+  message: { status: 'fail', message: "Trop de tentatives. Réessayez dans 15 minutes." }
 });
 app.use('/api', limiter);
 
 // --- ROUTES ---
 
+// Import des routes (Une fois que tu les auras créées)
+const adminRoutes = require('./src/modules/admin/admin.routes');
+const signalisationRoutes = require('./src/modules/signalisation/signalisation.routes');
+
+app.use('/api/v1/admins', adminRoutes);
+app.use('/api/v1/signalisation', signalisationRoutes);
+
 app.get('/api/v1/health', (req, res) => {
   res.status(200).json({ status: 'success', message: 'API opérationnelle' });
 });
-
-// app.use('/api/v1/escorts', escortRoutes);
-// app.use('/api/v1/admins', adminRoutes);
 
 // --- GESTION DES ERREURS 404 ---
 app.all('*', (req, res) => {
@@ -48,7 +76,8 @@ app.all('*', (req, res) => {
   });
 });
 
+// --- LANCEMENT DU SERVEUR ---
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`🚀 Serveur démarré sur le port ${PORT}`);
 });

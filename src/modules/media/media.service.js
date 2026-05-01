@@ -1,4 +1,4 @@
-const db = require('../../shared/database');
+const db = require('../../shares/database/config');
 const fs = require('fs').promises;
 
 const createMedia = async (url, id_publication) => {

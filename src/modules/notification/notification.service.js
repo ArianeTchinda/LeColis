@@ -1,4 +1,4 @@
-const db = require('../../shares/database/config');
+const db = require('../../shares/config/config');
 
 const createNotification = async (io, data) => {
   const { message, id_escort, id_admin } = data;

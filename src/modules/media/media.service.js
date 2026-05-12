@@ -1,28 +1,22 @@
-const db = require('../../shares/database/config');
-const fs = require('fs').promises;
+const db = require('../../shares/config/config');
+const minio = require('../../shares/utils/minio');
 
-const createMedia = async (url, id_publication) => {
+const createMedia = async (url, publication_id) => {
   const query = `
-    INSERT INTO media (url, id_publication)
+    INSERT INTO publication_media (url, publication_id)
     VALUES ($1, $2)
     RETURNING *;
   `;
-  const res = await db.query(query, [url, id_publication]);
+  const res = await db.query(query, [url, publication_id]);
   return res.rows[0];
 };
 
 const deleteMedia = async (id) => {
-  // 1. On récupère le chemin pour supprimer le fichier physique
-  const mediaRes = await db.query('SELECT url FROM media WHERE id = $1', [id]);
+  const mediaRes = await db.query('SELECT url FROM publication_media WHERE id = $1', [id]);
   if (mediaRes.rows.length > 0) {
-    try {
-      await fs.unlink(mediaRes.rows[0].url);
-    } catch (err) {
-      console.warn("Fichier déjà supprimé du disque");
-    }
+    await minio.deleteFile(mediaRes.rows[0].url);
   }
-  // 2. On supprime de la DB
-  return await db.query('DELETE FROM media WHERE id = $1', [id]);
+  return await db.query('DELETE FROM publication_media WHERE id = $1', [id]);
 };
 
 module.exports = { createMedia, deleteMedia };

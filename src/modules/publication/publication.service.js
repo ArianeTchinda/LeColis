@@ -1,124 +1,119 @@
 const publicationRepository = require('./publication.repository');
 const subscriptionService = require('../subscription/subscription.service');
+const subscriptionRepository = require('../subscription/subscription.repository');
 const { executeTransaction } = require('../../shares/database/transaction');
 const { AppError } = require('../../shares/middleware/errorHandler');
-const { PUBLICATION_STATUS } = require('./publication.constants');
 const logger = require('../../shares/utils/logger');
 
-// ──────────────────────────────────────────────────────────
-// SERVICE PUBLICATION — LE PLUS CRITIQUE 🔥
-//
-// AVANT chaque création de publication, on vérifie :
-//   1. ✅ Souscription active ?
-//   2. ✅ Date_fin non expirée ?
-//   3. ✅ Quota de publications respecté ?
-//
-// SI UNE RÈGLE FAIL → publication REFUSÉE ❌
-// ──────────────────────────────────────────────────────────
-
 /**
- * Crée une publication UNIQUEMENT si toutes les règles métier sont respectées.
- *
- * FLOW :
- *   1. Récupérer souscription active (vérifie aussi expiration en temps réel)
- *   2. Compter publications actives de l'escort
- *   3. Vérifier quota du plan
- *   4. Si tout OK → INSERT publication
+ * @swagger
+ * /api/v1/publications:
+ *   post:
+ *     summary: Créer une publication
+ *     tags: [Publications]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [titre, description]
+ *             properties:
+ *               titre: { type: string }
+ *               description: { type: string }
+ *               montant: { type: number }
+ *               duree: { type: integer }
+ *     responses:
+ *       201:
+ *         description: Publication créée
  */
-const createPublication = async ({ titre, description, id_categorie, id_escort }) => {
-  // ── RÈGLE 1 : Vérifier souscription active ──
+const createPublication = async ({ titre, description, montant, duree, id_escort }) => {
   const subscription = await subscriptionService.getActiveSubscription(id_escort);
 
   if (!subscription) {
-    throw new AppError(
-      'Publication impossible : aucun abonnement actif. Veuillez souscrire à un plan.',
-      403
-    );
+    throw new AppError('Aucun abonnement actif.', 403);
   }
 
-  // ── RÈGLE 2 : Vérifier quota du plan ──
-  const currentCount = await publicationRepository.countActiveByEscortId(id_escort);
+  const currentCount = subscription.nb_publications_utilisees;
   const maxPublications = subscription.plan_nb_publication;
 
   if (currentCount >= maxPublications) {
-    throw new AppError(
-      `Limite de publications atteinte (${currentCount}/${maxPublications}). ` +
-      `Votre plan "${subscription.plan_nom}" ne permet pas plus de publications. ` +
-      `Passez à un plan supérieur.`,
-      403
-    );
+    throw new AppError(`Quota de publications atteint (${currentCount}/${maxPublications}).`, 403);
   }
 
-  // ── RÈGLE 3 : Tout OK → Créer la publication ──
   const publication = await executeTransaction(async (client) => {
+    // 1. Incrémenter l'usage
+    await subscriptionRepository.incrementUsage(client, subscription.id);
+    
+    // 2. Créer la publication
     return publicationRepository.create(client, {
+      escort_id: id_escort,
+      abonnement_plan_id: subscription.id,
       titre,
       description,
-      status: PUBLICATION_STATUS.ACTIVE,
-      id_categorie: id_categorie || null,
-      id_escort,
+      statut: 'actif',
+      montant,
+      duree
     });
   });
 
-  logger.info(
-    `📢 Publication #${publication.id} créée par escort #${id_escort} ` +
-    `(${currentCount + 1}/${maxPublications} publications utilisées)`
-  );
-
+  logger.info(`📢 Publication #${publication.id} créée par escort #${id_escort}`);
   return publication;
 };
 
 /**
- * Récupère toutes les publications actives (vitrine publique).
+ * @swagger
+ * /api/v1/publications:
+ *   get:
+ *     summary: Récupérer les publications actives
+ *     tags: [Publications]
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer }
+ *       - in: query
+ *         name: offset
+ *         schema: { type: integer }
+ *     responses:
+ *       200:
+ *         description: Liste des publications
  */
 const getActivePublications = async ({ limit, offset } = {}) => {
   return publicationRepository.findAllActive({ limit, offset });
 };
 
-/**
- * Récupère les publications d'un escort (toutes, actives ou non).
- */
 const getPublicationsByEscort = async (escortId) => {
   return publicationRepository.findByEscortId(escortId);
 };
 
-/**
- * Récupère une publication par ID.
- */
 const getPublicationById = async (id) => {
   const publication = await publicationRepository.findById(id);
   if (!publication) {
     throw new AppError('Publication introuvable.', 404);
   }
+  // On incrémente les vues de manière asynchrone (pas grave si ça fail ou si c'est lent)
+  publicationRepository.incrementViews(id).catch(err => logger.error("Erreur increment views", err));
+  
   return publication;
 };
 
-/**
- * Supprime une publication.
- */
 const deletePublication = async (id, escortId) => {
   const publication = await publicationRepository.findById(id);
-
   if (!publication) {
     throw new AppError('Publication introuvable.', 404);
   }
 
-  // Vérifier que l'escort est bien le propriétaire
-  if (publication.id_escort !== parseInt(escortId, 10)) {
-    throw new AppError('Vous ne pouvez supprimer que vos propres publications.', 403);
+  if (publication.escort_id !== parseInt(escortId, 10)) {
+    throw new AppError('Non autorisé.', 403);
   }
 
   return publicationRepository.remove(id);
 };
 
-/**
- * JOB CRON — Désactive les publications des escorts dont la souscription vient d'expirer.
- */
 const deactivateExpiredPublications = async (escortId) => {
   const deactivated = await publicationRepository.deactivateAllByEscortId(escortId);
-  if (deactivated.length > 0) {
-    logger.info(`🔒 ${deactivated.length} publication(s) désactivée(s) pour escort #${escortId}`);
-  }
   return deactivated.length;
 };
 

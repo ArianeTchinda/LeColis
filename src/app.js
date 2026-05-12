@@ -1,213 +1,119 @@
 const express = require('express');
-const http = require('http'); // AJOUTÉ
+const http = require('http');
 const { Server } = require('socket.io');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const cors = require('cors');
 const cron = require('node-cron');
-const swaggerSpec = require('./shares/config/swagger.js');
 const swaggerUi = require('swagger-ui-express');
 require('dotenv').config();
 
-<<<<<<< HEAD
-// Connexion DB
+// Configs et Utils
+const swaggerSpec = require('./shares/config/swagger.js');
 const db = require('./shares/database/db');
-
-// Routes centralisées
-const routes = require('./routes');
-
-// Middleware d'erreur global
+const logger = require('./shares/utils/logger');
 const { errorHandler } = require('./shares/middleware/errorHandler');
 
 // Jobs CRON
 const { runExpireSubscriptions } = require('./jobs/subscription.job');
 
-const logger = require('./shares/utils/logger');
+// Import des Routes
+const routes = require('./routes'); // Routeur centralisé v2.0
 
 const app = express();
-
-// ═══════════════════════════════════════════════
-// SÉCURITÉ ET MIDDLEWARES
-// ═══════════════════════════════════════════════
-=======
-// Initialisation Express
-const app = express();
-
-// CRÉATION DU SERVEUR HTTP (Indispensable pour Socket.io)
-const server = http.createServer(app); 
+const server = http.createServer(app);
 
 // INITIALISATION SOCKET.IO
+
 const io = new Server(server, {
-  cors: {
-    origin: "*", 
-    methods: ["GET", "POST"]
-  }
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
+    }
 });
 
-// --- SÉCURITÉ ET MIDDLEWARES ---
->>>>>>> origin/LAETITIA
+// Logique Socket.io
+io.on('connection', (socket) => {
+    logger.info(`Un utilisateur connecté: ${socket.id}`);
+
+    socket.on('join_admin_room', () => {
+        socket.join('admins');
+        logger.info('Un admin a rejoint la room admins');
+    });
+
+    socket.on('join_escort_room', (escortId) => {
+        socket.join(`escort_${escortId}`);
+        logger.info(`Escorte ${escortId} connectée à sa room`);
+    });
+
+    socket.on('disconnect', () => {
+        logger.info('Utilisateur déconnecté');
+    });
+});
+
+// MIDDLEWARES DE SECURITE ET BASE
 
 app.use(helmet());
 app.use(cors());
 app.use(express.json({ limit: '10kb' }));
 
-
-// Rendre "io" accessible dans tous tes controllers via req.io
+// Injection de Socket.io dans les requêtes
 app.use((req, res, next) => {
-  req.io = io;
-  next();
+    req.io = io;
+    next();
 });
 
-// LOGIQUE SOCKET.IO
-io.on('connection', (socket) => {
-  console.log('🔌 Un utilisateur connecté:', socket.id);
-
-  socket.on('join_admin_room', () => {
-    socket.join('admins');
-    console.log('🛡️  Un admin a rejoint la room');
-  });
-
-  socket.on('join_escort_room', (escortId) => {
-    socket.join(`escort_${escortId}`);
-    console.log(`Escorte ${escortId} écoute ses notifications`);
-  });
-  socket.on('disconnect', () => {
-    console.log('❌ Utilisateur déconnecté');
-  });
-});
-
-// LIMITER LE NOMBRE DE REQUÊTES
+// Rate Limiting
 const limiter = rateLimit({
-<<<<<<< HEAD
-  windowMs: 15 * 60 * 1000,
-  max: 100,
-  message: 'Trop de tentatives. Réessayez dans 15 minutes.',
-=======
-  windowMs: 15 * 60 * 1000, 
-  max: 100, 
-  message: { status: 'fail', message: "Trop de tentatives. Réessayez dans 15 minutes." }
->>>>>>> origin/LAETITIA
+    windowMs: 15 * 60 * 1000,
+    max: 100,
+    message: { status: 'fail', message: "Trop de requêtes. Réessayez dans 15 minutes." }
 });
 app.use('/api', limiter);
 
-// ═══════════════════════════════════════════════
-// SWAGGER UI
-// ═══════════════════════════════════════════════
+// DOCUMENTATION SWAGGER
 
-<<<<<<< HEAD
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
-
-// Endpoint JSON brut du swagger
 app.get('/api-docs.json', (req, res) => res.json(swaggerSpec));
 
-
-/*
-app.get('/api-docs.json', (req, res) => {
-  res.setHeader('Content-Type', 'application/json');
-  res.send(swaggerSpec);
-=======
-// Import des routes (Une fois que tu les auras créées)
-const adminRoutes = require('./modules/admin/admin.routes');
-const signalisationRoutes = require('./modules/signalisation/signalisation.routes');
-const notificationRoutes = require('./modules/notification/notification.routes');
-const escortRoutes = require('./modules/escort/escort.routes');
-const avisRoutes = require('./modules/avis/avis.routes');
-
-
-// --- ROUTES ---
-
-console.log('Vérification des chargements :');
-console.log('- Admin:', typeof adminRoutes);
-console.log('- Signalisation:', typeof signalisationRoutes);
-console.log('- Notification:', typeof notificationRoutes);
-console.log('- Escort:', typeof escortRoutes);
-console.log('- Avis:', typeof avisRoutes);
-
-// Utilisation sécurisée pour identifier la ligne exacte du crash
-try { app.use('/api/v1/escorts', escortRoutes); } catch(e) { console.error('Crash sur Escorts'); }
-try { app.use('/api/v1/avis', avisRoutes); } catch(e) { console.error('Crash sur Avis'); }
-try { app.use('/api/v1/admins', adminRoutes); } catch(e) { console.error('Crash sur Admins'); }
-try { app.use('/api/v1/signalisation', signalisationRoutes); } catch(e) { console.error('Crash sur Signalisation'); }
-try { app.use('/api/v1/notifications', notificationRoutes); } catch(e) { console.error('Crash sur Notifications'); }
-
-app.get('/api/v1/health', (req, res) => {
-  res.status(200).json({ status: 'success', message: 'API opérationnelle' });
->>>>>>> origin/LAETITIA
-});
-*/
-
-<<<<<<< HEAD
-// ═══════════════════════════════════════════════
 // ROUTES
-// ═══════════════════════════════════════════════
 
-/**
- * @swagger
- * /api/v1/health:
- *   get:
- *     summary: Vérifie l'état du serveur
- *     tags: [Health]
- *     responses:
- *       200:
- *         description: Le serveur est opérationnel
- */
+// Health Check
 app.get('/api/v1/health', (req, res) => {
-  res.status(200).json({
-    status: 'success',
-    message: 'API opérationnelle',
-    timestamp: new Date().toISOString(),
-  });
+    res.status(200).json({
+        status: 'success',
+        message: 'API opérationnelle',
+        timestamp: new Date().toISOString(),
+    });
 });
 
-// Montage de toutes les routes modules
+// Montage des routes v2.0
 app.use('/api/v1', routes);
 
-// ═══════════════════════════════════════════════
 // GESTION DES ERREURS
-// ═══════════════════════════════════════════════
 
-// 404 — Route non trouvée
-app.all(/.*/, (req, res) => {
-  res.status(404).json({
-    status: 'fail',
-    message: `Impossible de trouver ${req.originalUrl} sur ce serveur.`,
-  });
+// 404 - Toujours après les routes
+app.all('/*splat', (req, res) => {
+    res.status(404).json({
+        status: 'fail',
+        message: `Impossible de trouver ${req.originalUrl} sur ce serveur.`
+    });
 });
 
-// Middleware global d'erreur
+// Middleware global d'erreur (en dernier)
 app.use(errorHandler);
 
-// ═══════════════════════════════════════════════
-// JOB CRON — Expiration automatique
-// ═══════════════════════════════════════════════
+// JOBS CRON
 
-// Exécuter toutes les heures à minute 0
 cron.schedule('0 * * * *', () => {
-  runExpireSubscriptions();
+    logger.info('Démarrage du job CRON : Expiration des abonnements');
+    runExpireSubscriptions();
 });
 
-logger.info('⏰ Job CRON d\'expiration planifié (toutes les heures)');
-
-// ═══════════════════════════════════════════════
 // LANCEMENT DU SERVEUR
-// ═══════════════════════════════════════════════
 
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  logger.info(`🚀 Serveur démarré sur le port ${PORT}`);
-  logger.info(`📚 Swagger UI disponible sur http://localhost:${PORT}/api-docs`);
-=======
-// --- GESTION DES ERREURS 404 ---
-app.use((req, res) => {
-  res.status(404).json({
-    status: 'fail',
-    message: `Impossible de trouver ${req.originalUrl} sur ce serveur.`
-  });
-});
-
-// --- LANCEMENT DU SERVEUR ---
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
-  console.log(`🚀 Serveur démarré sur le port ${PORT}`);
->>>>>>> origin/LAETITIA
+    logger.info(`Serveur démarré sur le port ${PORT}`);
+    logger.info(`Swagger : http://localhost:${PORT}/api-docs`);
 });

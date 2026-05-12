@@ -1,36 +1,35 @@
 const pool = require('../../shares/database/db');
 
 // ─────────────────────────────────────────────────────────────
-// REPOSITORY SOUSCRIPTION — SQL pur, aucune logique métier
-// Table : souscription (id, date_debut, date_fin, montant,
-//                        status, moyen_payement, id_escort, id_plan)
+// REPOSITORY ABONNEMENT_PLAN — SQL pur, aucune logique métier
+// Table : abonnement_plan (id, escort_id, plan_id, date_debut, 
+//                          date_fin, nb_publications_utilisees, statut)
 // ─────────────────────────────────────────────────────────────
 
 /**
- * Crée une souscription (appelé dans une transaction).
- * @param {object} client - Client PG transactionnel.
+ * Crée un abonnement (appelé dans une transaction).
  */
-const create = async (client, { date_fin, montant, status, moyen_payement, id_escort, id_plan }) => {
+const create = async (client, { escort_id, plan_id, date_debut, date_fin, statut }) => {
   const query = `
-    INSERT INTO souscription (date_fin, montant, status, moyen_payement, id_escort, id_plan)
-    VALUES ($1, $2, $3, $4, $5, $6)
+    INSERT INTO abonnement_plan (escort_id, plan_id, date_debut, date_fin, statut)
+    VALUES ($1, $2, $3, $4, $5)
     RETURNING *;
   `;
-  const values = [date_fin, montant, status, moyen_payement, id_escort, id_plan];
+  const values = [escort_id, plan_id, date_debut || new Date(), date_fin, statut || 'actif'];
   const { rows } = await client.query(query, values);
   return rows[0];
 };
 
 /**
- * Récupère la souscription ACTIVE d'un escort (la plus récente).
+ * Récupère l'abonnement ACTIF d'un escort (le plus récent).
  */
 const findActiveByEscortId = async (escortId) => {
   const query = `
-    SELECT s.*, p.nom AS plan_nom, p.duree AS plan_duree, p.nb_publication AS plan_nb_publication
-    FROM souscription s
-    LEFT JOIN plan p ON s.id_plan = p.id
-    WHERE s.id_escort = $1 AND s.status = 'active'
-    ORDER BY s.date_debut DESC
+    SELECT a.*, p.nom AS plan_nom, p.duree_jours AS plan_duree, p.nb_publications AS plan_nb_publication
+    FROM abonnement_plan a
+    JOIN plan p ON a.plan_id = p.id
+    WHERE a.escort_id = $1 AND a.statut = 'actif'
+    ORDER BY a.date_debut DESC
     LIMIT 1;
   `;
   const { rows } = await pool.query(query, [escortId]);
@@ -38,51 +37,59 @@ const findActiveByEscortId = async (escortId) => {
 };
 
 /**
- * Récupère l'historique complet des souscriptions d'un escort.
+ * Récupère l'historique complet des abonnements d'un escort.
  */
 const findAllByEscortId = async (escortId) => {
   const query = `
-    SELECT s.*, p.nom AS plan_nom, p.duree AS plan_duree, p.nb_publication AS plan_nb_publication
-    FROM souscription s
-    LEFT JOIN plan p ON s.id_plan = p.id
-    WHERE s.id_escort = $1
-    ORDER BY s.date_debut DESC;
+    SELECT a.*, p.nom AS plan_nom, p.nb_publications AS plan_nb_publication
+    FROM abonnement_plan a
+    JOIN plan p ON a.plan_id = p.id
+    WHERE a.escort_id = $1
+    ORDER BY a.date_debut DESC;
   `;
   const { rows } = await pool.query(query, [escortId]);
   return rows;
 };
 
 /**
- * Récupère une souscription par ID.
+ * Récupère un abonnement par ID.
  */
 const findById = async (id) => {
   const query = `
-    SELECT s.*, p.nom AS plan_nom, p.duree AS plan_duree, p.nb_publication AS plan_nb_publication
-    FROM souscription s
-    LEFT JOIN plan p ON s.id_plan = p.id
-    WHERE s.id = $1;
+    SELECT a.*, p.nom AS plan_nom, p.nb_publications AS plan_nb_publication
+    FROM abonnement_plan a
+    JOIN plan p ON a.plan_id = p.id
+    WHERE a.id = $1;
   `;
   const { rows } = await pool.query(query, [id]);
   return rows[0] || null;
 };
 
 /**
- * Met à jour le statut d'une souscription (appelé dans une transaction).
+ * Met à jour le statut d'un abonnement.
  */
-const updateStatus = async (client, subscriptionId, status) => {
-  const query = `UPDATE souscription SET status = $1 WHERE id = $2 RETURNING *;`;
-  const { rows } = await client.query(query, [status, subscriptionId]);
+const updateStatus = async (client, subscriptionId, statut) => {
+  const query = `UPDATE abonnement_plan SET statut = $1 WHERE id = $2 RETURNING *;`;
+  const { rows } = await client.query(query, [statut, subscriptionId]);
   return rows[0];
 };
 
 /**
- * Récupère toutes les souscriptions actives dont la date_fin est dépassée.
- * (Pour le job CRON d'expiration)
+ * Incrémente le nombre de publications utilisées.
+ */
+const incrementUsage = async (client, id) => {
+  const query = `UPDATE abonnement_plan SET nb_publications_utilisees = nb_publications_utilisees + 1 WHERE id = $1 RETURNING nb_publications_utilisees;`;
+  const { rows } = await client.query(query, [id]);
+  return rows[0].nb_publications_utilisees;
+};
+
+/**
+ * Récupère les abonnements expirés.
  */
 const findExpired = async () => {
   const query = `
-    SELECT * FROM souscription
-    WHERE status = 'active' AND date_fin < CURRENT_DATE;
+    SELECT * FROM abonnement_plan
+    WHERE statut = 'actif' AND date_fin < CURRENT_DATE;
   `;
   const { rows } = await pool.query(query);
   return rows;
@@ -94,5 +101,6 @@ module.exports = {
   findAllByEscortId,
   findById,
   updateStatus,
+  incrementUsage,
   findExpired,
 };

@@ -2,23 +2,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const dir = 'public/uploads/documents/';
-    
-    // Sécurité : Si le dossier n'existe pas, on le crée automatiquement
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    
-    cb(null, dir);
-  },
-  filename: (req, file, cb) => {
-    // Ton système de nommage est parfait : fieldname-timestamp-random.ext
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, `${file.fieldname}-${uniqueSuffix}${path.extname(file.originalname)}`);
-  }
-});
+const storage = multer.memoryStorage();
 
 // Filtre pour n'accepter que des images (Sécurité importante !)
 const fileFilter = (req, file, cb) => {

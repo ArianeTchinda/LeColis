@@ -2,20 +2,21 @@ const pool = require('../../shares/database/db');
 
 // ──────────────────────────────────────────────────────────
 // REPOSITORY PUBLICATION — SQL pur, aucune logique métier
-// Table : publication (id, titre, description, status,
-//                      id_categorie, id_escort)
+// Table : publication (id, escort_id, abonnement_plan_id, 
+//                      titre, description, statut, montant, 
+//                      duree, vh_publication)
 // ──────────────────────────────────────────────────────────
 
 /**
  * Crée une publication (appelé dans une transaction).
  */
-const create = async (client, { titre, description, status, id_categorie, id_escort }) => {
+const create = async (client, { escort_id, abonnement_plan_id, titre, description, statut, montant, duree }) => {
   const query = `
-    INSERT INTO publication (titre, description, status, id_categorie, id_escort)
-    VALUES ($1, $2, $3, $4, $5)
+    INSERT INTO publication (escort_id, abonnement_plan_id, titre, description, statut, montant, duree)
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
     RETURNING *;
   `;
-  const { rows } = await client.query(query, [titre, description, status, id_categorie, id_escort]);
+  const { rows } = await client.query(query, [escort_id, abonnement_plan_id, titre, description, statut || 'actif', montant, duree]);
   return rows[0];
 };
 
@@ -24,10 +25,10 @@ const create = async (client, { titre, description, status, id_categorie, id_esc
  */
 const findById = async (id) => {
   const query = `
-    SELECT p.*, c.nom AS categorie_nom, e.pseudo AS escort_pseudo
+    SELECT p.*, u.pseudonyme AS escort_pseudo
     FROM publication p
-    LEFT JOIN categorie c ON p.id_categorie = c.id
-    LEFT JOIN escort e ON p.id_escort = e.id
+    JOIN escort e ON p.escort_id = e.id
+    JOIN utilisateur u ON e.utilisateur_id = u.id
     WHERE p.id = $1;
   `;
   const { rows } = await pool.query(query, [id]);
@@ -39,12 +40,13 @@ const findById = async (id) => {
  */
 const findAllActive = async ({ limit = 50, offset = 0 } = {}) => {
   const query = `
-    SELECT p.*, c.nom AS categorie_nom, e.pseudo AS escort_pseudo
+    SELECT p.*, u.pseudonyme AS escort_pseudo, u.age, l.ville
     FROM publication p
-    LEFT JOIN categorie c ON p.id_categorie = c.id
-    LEFT JOIN escort e ON p.id_escort = e.id
-    WHERE p.status = 'active'
-    ORDER BY p.id DESC
+    JOIN escort e ON p.escort_id = e.id
+    JOIN utilisateur u ON e.utilisateur_id = u.id
+    LEFT JOIN localisation l ON e.localisation_id = l.id
+    WHERE p.statut = 'actif'
+    ORDER BY p.created_at DESC
     LIMIT $1 OFFSET $2;
   `;
   const { rows } = await pool.query(query, [limit, offset]);
@@ -56,11 +58,9 @@ const findAllActive = async ({ limit = 50, offset = 0 } = {}) => {
  */
 const findByEscortId = async (escortId) => {
   const query = `
-    SELECT p.*, c.nom AS categorie_nom
-    FROM publication p
-    LEFT JOIN categorie c ON p.id_categorie = c.id
-    WHERE p.id_escort = $1
-    ORDER BY p.id DESC;
+    SELECT * FROM publication 
+    WHERE escort_id = $1
+    ORDER BY created_at DESC;
   `;
   const { rows } = await pool.query(query, [escortId]);
   return rows;
@@ -69,10 +69,19 @@ const findByEscortId = async (escortId) => {
 /**
  * Met à jour le statut d'une publication.
  */
-const updateStatus = async (id, status) => {
-  const query = `UPDATE publication SET status = $1 WHERE id = $2 RETURNING *;`;
-  const { rows } = await pool.query(query, [status, id]);
+const updateStatus = async (id, statut) => {
+  const query = `UPDATE publication SET statut = $1 WHERE id = $2 RETURNING *;`;
+  const { rows } = await pool.query(query, [statut, id]);
   return rows[0] || null;
+};
+
+/**
+ * Incrémente le nombre de vues.
+ */
+const incrementViews = async (id) => {
+  const query = `UPDATE publication SET vh_publication = vh_publication + 1 WHERE id = $1 RETURNING vh_publication;`;
+  const { rows } = await pool.query(query, [id]);
+  return rows[0] ? rows[0].vh_publication : 0;
 };
 
 /**
@@ -87,7 +96,7 @@ const remove = async (id) => {
  * Compte les publications ACTIVES d'un escort (pour vérifier le quota).
  */
 const countActiveByEscortId = async (escortId) => {
-  const query = `SELECT COUNT(*)::int AS count FROM publication WHERE id_escort = $1 AND status = 'active';`;
+  const query = `SELECT COUNT(*)::int AS count FROM publication WHERE escort_id = $1 AND statut = 'actif';`;
   const { rows } = await pool.query(query, [escortId]);
   return rows[0].count;
 };
@@ -97,8 +106,8 @@ const countActiveByEscortId = async (escortId) => {
  */
 const deactivateAllByEscortId = async (escortId) => {
   const query = `
-    UPDATE publication SET status = 'inactive'
-    WHERE id_escort = $1 AND status = 'active'
+    UPDATE publication SET statut = 'inactif'
+    WHERE escort_id = $1 AND statut = 'actif'
     RETURNING *;
   `;
   const { rows } = await pool.query(query, [escortId]);
@@ -111,6 +120,7 @@ module.exports = {
   findAllActive,
   findByEscortId,
   updateStatus,
+  incrementViews,
   remove,
   countActiveByEscortId,
   deactivateAllByEscortId,

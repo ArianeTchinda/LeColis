@@ -1,132 +1,124 @@
 const subscriptionService = require('./subscription.service');
 const asyncHandler = require('../../shares/middleware/asyncHandler');
 
-// ──────────────────────────────────────────────
-// CONTROLLER SUBSCRIPTION — Juste API
-// Reçoit request → appelle service → retourne response
-// ──────────────────────────────────────────────
-
 /**
  * @swagger
  * /api/v1/subscriptions:
  *   post:
- *     summary: Souscrire à un plan (paiement + activation)
+ *     summary: Souscrire a un plan
  *     tags: [Souscriptions]
+ *     security:
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
- *             $ref: '#/components/schemas/SubscriptionInput'
+ *             type: object
+ *             required: [planId]
+ *             properties:
+ *               planId: { type: integer }
  *     responses:
  *       201:
- *         description: Souscription créée avec succès
+ *         description: Souscription creee avec succes
  *       400:
- *         description: Abonnement déjà actif ou données invalides
- *       402:
- *         description: Paiement échoué
- *       404:
- *         description: Plan introuvable
+ *         description: Abonnement deja actif
  */
 const subscribe = asyncHandler(async (req, res) => {
-  const { escortId, planId, montant, moyen_payement } = req.body;
+  const { planId } = req.body;
+  const escortId = req.user.id;
 
   const subscription = await subscriptionService.subscribe({
     escortId,
     planId,
-    montant,
-    moyen_payement,
   });
 
   res.status(201).json({
     status: 'success',
-    message: 'Souscription créée avec succès.',
-    data: { subscription },
+    data: subscription,
   });
 });
 
 /**
  * @swagger
- * /api/v1/subscriptions/active/{escortId}:
- *   get:
- *     summary: Récupère l'abonnement actif d'un escort
+ * /api/v1/subscriptions/upgrade:
+ *   post:
+ *     summary: Changer de plan (Upgrade)
  *     tags: [Souscriptions]
- *     parameters:
- *       - in: path
- *         name: escortId
- *         required: true
- *         schema:
- *           type: integer
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [newPlanId]
+ *             properties:
+ *               newPlanId: { type: integer }
  *     responses:
  *       200:
- *         description: Abonnement actif (ou null si aucun)
+ *         description: Upgrade reussi
  */
-const getActive = asyncHandler(async (req, res) => {
-  const subscription = await subscriptionService.getActiveSubscription(
-    parseInt(req.params.escortId, 10)
-  );
+const upgrade = asyncHandler(async (req, res) => {
+  const { newPlanId } = req.body;
+  const escortId = req.user.id;
+
+  const subscription = await subscriptionService.upgradeSubscription({
+    escortId,
+    newPlanId,
+  });
 
   res.status(200).json({
     status: 'success',
-    data: { subscription },
+    message: 'Upgrade reussi !',
+    data: subscription,
   });
 });
 
 /**
  * @swagger
- * /api/v1/subscriptions/history/{escortId}:
+ * /api/v1/subscriptions/active:
  *   get:
- *     summary: Récupère l'historique des souscriptions d'un escort
+ *     summary: Recuperer mon abonnement actif
  *     tags: [Souscriptions]
- *     parameters:
- *       - in: path
- *         name: escortId
- *         required: true
- *         schema:
- *           type: integer
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Abonnement actif
+ */
+const getActive = asyncHandler(async (req, res) => {
+  const escortId = req.user.id;
+  const subscription = await subscriptionService.getActiveSubscription(escortId);
+
+  res.status(200).json({
+    status: 'success',
+    data: subscription,
+  });
+});
+
+/**
+ * @swagger
+ * /api/v1/subscriptions/history:
+ *   get:
+ *     summary: Recuperer l'historique de mes souscriptions
+ *     tags: [Souscriptions]
+ *     security:
+ *       - bearerAuth: []
  *     responses:
  *       200:
  *         description: Historique des souscriptions
  */
 const getHistory = asyncHandler(async (req, res) => {
-  const subscriptions = await subscriptionService.getSubscriptionHistory(
-    parseInt(req.params.escortId, 10)
-  );
+  const escortId = req.user.id;
+  const subscriptions = await subscriptionService.getSubscriptionHistory(escortId);
 
   res.status(200).json({
     status: 'success',
     results: subscriptions.length,
-    data: { subscriptions },
+    data: subscriptions,
   });
 });
 
-/**
- * @swagger
- * /api/v1/subscriptions/{id}:
- *   get:
- *     summary: Récupère une souscription par ID
- *     tags: [Souscriptions]
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: integer
- *     responses:
- *       200:
- *         description: Détails de la souscription
- *       404:
- *         description: Souscription introuvable
- */
-const getOne = asyncHandler(async (req, res) => {
-  const subscription = await subscriptionService.getSubscriptionById(
-    parseInt(req.params.id, 10)
-  );
-
-  res.status(200).json({
-    status: 'success',
-    data: { subscription },
-  });
-});
-
-module.exports = { subscribe, getActive, getHistory, getOne };
+module.exports = { subscribe, upgrade, getActive, getHistory };

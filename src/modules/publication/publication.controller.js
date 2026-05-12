@@ -1,17 +1,28 @@
 const publicationService = require('./publication.service');
 const asyncHandler = require('../../shares/middleware/asyncHandler');
 
-// ──────────────────────────────────────────────
-// CONTROLLER PUBLICATION — Juste API
-// Reçoit request → appelle service → retourne response
-// ──────────────────────────────────────────────
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     PublicationInput:
+ *       type: object
+ *       required: [titre, description]
+ *       properties:
+ *         titre: { type: string }
+ *         description: { type: string }
+ *         montant: { type: number }
+ *         duree: { type: integer }
+ */
 
 /**
  * @swagger
  * /api/v1/publications:
  *   post:
- *     summary: Crée une publication (vérifie abonnement + quota)
+ *     summary: Cree une publication (verifie abonnement + quota)
  *     tags: [Publications]
+ *     security:
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -20,17 +31,17 @@ const asyncHandler = require('../../shares/middleware/asyncHandler');
  *             $ref: '#/components/schemas/PublicationInput'
  *     responses:
  *       201:
- *         description: Publication créée
+ *         description: Publication creee
  *       403:
- *         description: Pas d'abonnement actif ou quota dépassé
+ *         description: Pas d'abonnement actif ou quota depasse
  */
 const create = asyncHandler(async (req, res) => {
-  const publication = await publicationService.createPublication(req.body);
+  const escort_id = req.user.id;
+  const publication = await publicationService.createPublication({ ...req.body, id_escort: escort_id });
 
   res.status(201).json({
     status: 'success',
-    message: 'Publication créée avec succès.',
-    data: { publication },
+    data: publication,
   });
 });
 
@@ -38,19 +49,15 @@ const create = asyncHandler(async (req, res) => {
  * @swagger
  * /api/v1/publications:
  *   get:
- *     summary: Récupère toutes les publications actives (vitrine publique)
+ *     summary: Recupere toutes les publications actives (vitrine publique)
  *     tags: [Publications]
  *     parameters:
  *       - in: query
  *         name: limit
- *         schema:
- *           type: integer
- *           default: 50
+ *         schema: { type: integer, default: 50 }
  *       - in: query
  *         name: offset
- *         schema:
- *           type: integer
- *           default: 0
+ *         schema: { type: integer, default: 0 }
  *     responses:
  *       200:
  *         description: Liste des publications actives
@@ -64,7 +71,7 @@ const getAll = asyncHandler(async (req, res) => {
   res.status(200).json({
     status: 'success',
     results: publications.length,
-    data: { publications },
+    data: publications,
   });
 });
 
@@ -72,14 +79,13 @@ const getAll = asyncHandler(async (req, res) => {
  * @swagger
  * /api/v1/publications/escort/{escortId}:
  *   get:
- *     summary: Récupère les publications d'un escort
+ *     summary: Recupere les publications d'un escort
  *     tags: [Publications]
  *     parameters:
  *       - in: path
  *         name: escortId
  *         required: true
- *         schema:
- *           type: integer
+ *         schema: { type: integer }
  *     responses:
  *       200:
  *         description: Publications de l'escort
@@ -92,7 +98,7 @@ const getByEscort = asyncHandler(async (req, res) => {
   res.status(200).json({
     status: 'success',
     results: publications.length,
-    data: { publications },
+    data: publications,
   });
 });
 
@@ -100,17 +106,16 @@ const getByEscort = asyncHandler(async (req, res) => {
  * @swagger
  * /api/v1/publications/{id}:
  *   get:
- *     summary: Récupère une publication par ID
+ *     summary: Recupere une publication par ID
  *     tags: [Publications]
  *     parameters:
  *       - in: path
  *         name: id
  *         required: true
- *         schema:
- *           type: integer
+ *         schema: { type: integer }
  *     responses:
  *       200:
- *         description: Détails de la publication
+ *         description: Details de la publication
  *       404:
  *         description: Publication introuvable
  */
@@ -121,7 +126,7 @@ const getOne = asyncHandler(async (req, res) => {
 
   res.status(200).json({
     status: 'success',
-    data: { publication },
+    data: publication,
   });
 });
 
@@ -129,37 +134,23 @@ const getOne = asyncHandler(async (req, res) => {
  * @swagger
  * /api/v1/publications/{id}:
  *   delete:
- *     summary: Supprime une publication (propriétaire uniquement)
+ *     summary: Supprime une publication (proprietaire uniquement)
  *     tags: [Publications]
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
  *         required: true
- *         schema:
- *           type: integer
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - id_escort
- *             properties:
- *               id_escort:
- *                 type: integer
+ *         schema: { type: integer }
  *     responses:
  *       204:
- *         description: Publication supprimée
- *       403:
- *         description: Non propriétaire
- *       404:
- *         description: Publication introuvable
+ *         description: Publication supprimee
  */
 const remove = asyncHandler(async (req, res) => {
   await publicationService.deletePublication(
     parseInt(req.params.id, 10),
-    req.body.id_escort
+    req.user.id
   );
 
   res.status(204).json({

@@ -1,95 +1,184 @@
--- Phase 1 : Tables de base (Indépendantes)
-CREATE TABLE admin (
+-- LeColis.com - Database Schema v2.0
+-- Cleanup
+DROP TABLE IF EXISTS logo_site CASCADE;
+DROP TABLE IF EXISTS signalement CASCADE;
+DROP TABLE IF EXISTS notification CASCADE;
+DROP TABLE IF EXISTS transaction CASCADE;
+DROP TABLE IF EXISTS avis CASCADE;
+DROP TABLE IF EXISTS publication_media CASCADE;
+DROP TABLE IF EXISTS publication CASCADE;
+DROP TABLE IF EXISTS abonnement_plan CASCADE;
+DROP TABLE IF EXISTS plan CASCADE;
+DROP TABLE IF EXISTS escort CASCADE;
+DROP TABLE IF EXISTS localisation CASCADE;
+DROP TABLE IF EXISTS utilisateur CASCADE;
+DROP TABLE IF EXISTS categorie CASCADE;
+
+-- 1.1 Table : utilisateur
+CREATE TYPE user_role AS ENUM('client', 'escort', 'admin');
+CREATE TYPE user_status AS ENUM('actif', 'suspendu', 'banni');
+
+CREATE TABLE utilisateur (
     id SERIAL PRIMARY KEY,
-    nom VARCHAR(100),
-    prenom VARCHAR(100),
-    email VARCHAR(255) UNIQUE NOT NULL,
-    password TEXT NOT NULL
+    nom VARCHAR(100) NOT NULL,
+    prenom VARCHAR(100) NOT NULL,
+    pseudonyme VARCHAR(100) UNIQUE NOT NULL,
+    age INTEGER NOT NULL,
+    description TEXT,
+    telephone VARCHAR(20),
+    mail VARCHAR(191) UNIQUE NOT NULL,
+    password VARCHAR(255) NOT NULL,
+    role user_role DEFAULT 'client',
+    statut user_status DEFAULT 'actif',
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
 );
 
+-- 1.2 Table : localisation
 CREATE TABLE localisation (
     id SERIAL PRIMARY KEY,
-    pay VARCHAR(100),
-    ville VARCHAR(100),
-    quatiers VARCHAR(100)
+    ville VARCHAR(150) NOT NULL,
+    quartier VARCHAR(150),
+    pays VARCHAR(100) DEFAULT 'Cameroun'
 );
 
-CREATE TABLE plan (
-    id SERIAL PRIMARY KEY,
-    nom VARCHAR(100),
-    duree INTEGER, -- Nombre de jours de validité
-    nb_publication INTEGER
-);
+-- 1.3 Table : escort
+CREATE TYPE verification_status AS ENUM('non_soumis', 'en_attente', 'vérifié', 'rejeté');
 
-CREATE TABLE categorie (
-    id SERIAL PRIMARY KEY,
-    nom VARCHAR(100) UNIQUE
-);
-
--- Phase 2 : Profil Escort (Dépend de localisation)
 CREATE TABLE escort (
     id SERIAL PRIMARY KEY,
-    nom VARCHAR(100),
-    pseudo VARCHAR(100) UNIQUE,
-    age INTEGER,
-    description TEXT,
-    telephone VARCHAR(30),
-    mail VARCHAR(150) UNIQUE,
-    profile_picture VARCHAR(255),
-    password TEXT NOT NULL,
-    status VARCHAR(50),
-    -- On stocke ici uniquement les URLs des images
-    recto_card TEXT, 
-    verso_card TEXT,
-    id_localisation INTEGER REFERENCES localisation(id) ON DELETE SET NULL
+    utilisateur_id INTEGER UNIQUE NOT NULL REFERENCES utilisateur(id) ON DELETE CASCADE,
+    url_image_profil VARCHAR(500),
+    localisation_id INTEGER REFERENCES localisation(id) ON DELETE SET NULL,
+    url VARCHAR(500),
+    tarif DECIMAL(10,2),
+    disponible BOOLEAN DEFAULT TRUE,
+    verified verification_status DEFAULT 'non_soumis',
+    url_cni_recto VARCHAR(500),
+    url_cni_verso VARCHAR(500),
+    note_admin TEXT,
+    created_at TIMESTAMP DEFAULT NOW()
 );
 
--- Phase 3 : Activités et Interactions (Dépendent d'Escort/Admin/Plan)
+-- 1.4 Table : plan
+CREATE TABLE plan (
+    id SERIAL PRIMARY KEY,
+    nom VARCHAR(100) NOT NULL,
+    description TEXT,
+    nb_publications INTEGER NOT NULL,
+    duree_jours INTEGER NOT NULL,
+    prix DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    actif BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Initial Plan
+INSERT INTO plan (nom, description, nb_publications, duree_jours, prix, actif)
+VALUES ('Standard', 'Plan gratuit offert à la création du compte escort', 1, 7, 0.00, TRUE);
+
+-- 1.5 Table : abonnement_plan
+CREATE TYPE subscription_status AS ENUM('actif', 'expiré', 'annulé');
+
+CREATE TABLE abonnement_plan (
+    id SERIAL PRIMARY KEY,
+    escort_id INTEGER NOT NULL REFERENCES escort(id) ON DELETE CASCADE,
+    plan_id INTEGER NOT NULL REFERENCES plan(id) ON DELETE CASCADE,
+    date_debut DATE NOT NULL,
+    date_fin DATE NOT NULL,
+    nb_publications_utilisees INTEGER DEFAULT 0,
+    statut subscription_status DEFAULT 'actif',
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- 1.6 Table : publication
+CREATE TYPE publication_status AS ENUM('actif', 'inactif');
+
 CREATE TABLE publication (
     id SERIAL PRIMARY KEY,
-    titre VARCHAR(255),
-    description TEXT,
-    status VARCHAR(50),
-    id_categorie INTEGER REFERENCES categorie(id) ON DELETE SET NULL,
-    id_escort INTEGER REFERENCES escort(id) ON DELETE CASCADE
+    escort_id INTEGER NOT NULL REFERENCES escort(id) ON DELETE CASCADE,
+    abonnement_plan_id INTEGER NOT NULL REFERENCES abonnement_plan(id) ON DELETE CASCADE,
+    titre VARCHAR(255) NOT NULL,
+    description TEXT NOT NULL,
+    statut publication_status DEFAULT 'actif',
+    montant DECIMAL(10,2),
+    duree INTEGER, -- en heures
+    vh_publication INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE TABLE souscription (
+-- 1.7 Table : publication_media
+CREATE TABLE publication_media (
     id SERIAL PRIMARY KEY,
-    date_debut DATE DEFAULT CURRENT_DATE,
-    date_fin DATE,
-    montant DECIMAL(10, 2),
-    status VARCHAR(50),
-    moyen_payement VARCHAR(100),
-    id_escort INTEGER REFERENCES escort(id) ON DELETE CASCADE,
-    id_plan INTEGER REFERENCES plan(id) ON DELETE SET NULL
+    publication_id INTEGER NOT NULL REFERENCES publication(id) ON DELETE CASCADE,
+    url VARCHAR(500) NOT NULL,
+    ordre SMALLINT DEFAULT 0,
+    created_at TIMESTAMP DEFAULT NOW()
 );
 
+-- 1.8 Table : avis
 CREATE TABLE avis (
     id SERIAL PRIMARY KEY,
+    utilisateur_id INTEGER NOT NULL REFERENCES utilisateur(id) ON DELETE CASCADE,
+    escort_id INTEGER NOT NULL REFERENCES escort(id) ON DELETE CASCADE,
+    rate SMALLINT NOT NULL CHECK (rate BETWEEN 1 AND 5),
     message TEXT,
-    date DATE DEFAULT CURRENT_DATE,
-    rate INTEGER CHECK (rate BETWEEN 0 AND 5),
-    id_escort INTEGER REFERENCES escort(id) ON DELETE CASCADE
+    created_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE TABLE signalisation (
+-- 1.9 Table : transaction
+CREATE TYPE transaction_status AS ENUM('en_attente', 'validé', 'échoué', 'remboursé');
+
+CREATE TABLE transaction (
     id SERIAL PRIMARY KEY,
-    raison TEXT,
-    id_admin INTEGER REFERENCES admin(id) ON DELETE SET NULL,
-    id_escort INTEGER REFERENCES escort(id) ON DELETE CASCADE
+    escort_id INTEGER NOT NULL REFERENCES escort(id) ON DELETE CASCADE,
+    plan_id INTEGER NOT NULL REFERENCES plan(id) ON DELETE CASCADE,
+    abonnement_plan_id INTEGER REFERENCES abonnement_plan(id) ON DELETE SET NULL,
+    montant DECIMAL(10,2) NOT NULL,
+    statut transaction_status DEFAULT 'en_attente',
+    reference_paiement VARCHAR(255),
+    created_at TIMESTAMP DEFAULT NOW()
 );
 
+-- 1.10 Table : notification
 CREATE TABLE notification (
     id SERIAL PRIMARY KEY,
-    message TEXT,
-    id_escort INTEGER REFERENCES escort(id) ON DELETE CASCADE,
-    id_admin INTEGER REFERENCES admin(id) ON DELETE SET NULL
-);  
+    utilisateur_id INTEGER NOT NULL REFERENCES utilisateur(id) ON DELETE CASCADE,
+    titre VARCHAR(255) NOT NULL,
+    message TEXT NOT NULL,
+    lu BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT NOW()
+);
 
--- Phase 4 : Contenu lié aux publications
-CREATE TABLE media (
+-- 1.11 Table : signalement
+CREATE TYPE report_reason AS ENUM('faux_compte', 'spam', 'contenu_inapproprié', 'autre');
+CREATE TYPE report_status AS ENUM('en_attente', 'traité', 'rejeté');
+
+CREATE TABLE signalement (
     id SERIAL PRIMARY KEY,
-    url TEXT NOT NULL, -- URL de la photo ou vidéo
-    id_publication INTEGER REFERENCES publication(id) ON DELETE CASCADE
+    rapporteur_id INTEGER NOT NULL REFERENCES utilisateur(id) ON DELETE CASCADE,
+    escort_id INTEGER NOT NULL REFERENCES escort(id) ON DELETE CASCADE,
+    motif report_reason NOT NULL,
+    description TEXT,
+    statut report_status DEFAULT 'en_attente',
+    traite_par INTEGER REFERENCES utilisateur(id) ON DELETE SET NULL,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- 1.12 Table : logo_site
+CREATE TABLE logo_site (
+    id SERIAL PRIMARY KEY,
+    url_logo VARCHAR(500) NOT NULL,
+    label VARCHAR(150),
+    date_debut DATE NOT NULL,
+    date_fin DATE NOT NULL,
+    actif BOOLEAN DEFAULT FALSE,
+    created_by INTEGER REFERENCES utilisateur(id) ON DELETE SET NULL,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Categories (from previous schema)
+CREATE TABLE categorie (
+    id SERIAL PRIMARY KEY,
+    nom VARCHAR(100) UNIQUE NOT NULL
 );

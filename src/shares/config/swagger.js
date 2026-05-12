@@ -1,39 +1,32 @@
 const swaggerJsdoc = require('swagger-jsdoc');
 
 // ═══════════════════════════════════════════════
-// SWAGGER CONFIGURATION
+// SWAGGER CONFIGURATION v2.0
 // ═══════════════════════════════════════════════
 
 const swaggerOptions = {
   definition: {
     openapi: '3.0.0',
     info: {
-      title: 'LeColis API — DEV 1 (Core Business)',
-      version: '1.0.0',
+      title: 'LeColis.com API — v2.0',
+      version: '2.0.0',
       description: `
-## API Backend — Module Core Business
+## API Backend — LeColis.com
+Documentation technique alignée sur la version 2.0 du projet.
 
-### Modules :
-- **Plans** : Configuration des abonnements (CRUD admin)
-- **Souscriptions** : Gestion des abonnements escorts (paiement → activation)
-- **Publications** : Annonces des escorts (vérification abonnement + quota)
+### Modules principaux :
+- **Utilisateurs** : Gestion unifiée des comptes (Client, Escort, Admin).
+- **Escorts** : Profils étendus, vérification d'identité (CNI), tarifs et disponibilité.
+- **Plans & Abonnements** : Gestion des offres et souscriptions conditionnant les publications.
+- **Publications** : Annonces avec gestion de médias (Cloud Storage via Minio).
+- **Transactions** : Suivi des paiements.
+- **Interactions** : Avis, Signalements, Notifications.
 
-### Règles métier critiques :
-- Publier sans abonnement actif = INTERDIT
-- Dépasser le quota du plan = INTERDIT
-- Créer une souscription sans paiement = INTERDIT
-- Vérification automatique à chaque publication
-
-### Flow complet :
-1. Admin crée des plans
-2. Escort choisit un plan → paiement
-3. Paiement réussi → souscription activée
-4. Escort crée des publications (dans la limite du quota)
-5. Job CRON expire automatiquement les souscriptions
+### Règles critiques :
+- Authentification via JWT avec rôles (\`client\`, \`escort\`, \`admin\`).
+- Minio utilisé pour tout le stockage média.
+- Validation automatique des quotas de publication selon l'abonnement actif.
       `,
-      contact: {
-        name: 'DEV 1 — Core Business',
-      },
     },
     servers: [
       {
@@ -42,127 +35,107 @@ const swaggerOptions = {
       },
     ],
     tags: [
-      { name: 'Health', description: 'Vérification de l\'état du serveur' },
-      { name: 'Plans', description: 'Gestion des plans d\'abonnement (admin)' },
-      { name: 'Souscriptions', description: 'Gestion des abonnements escorts' },
-      { name: 'Publications', description: 'Gestion des annonces' },
+      { name: 'Auth', description: 'Connexion et Inscription' },
+      { name: 'Escorts', description: 'Profils et vérification' },
+      { name: 'Plans', description: 'Offres d\'abonnement' },
+      { name: 'Abonnements', description: 'Souscriptions des escorts' },
+      { name: 'Publications', description: 'Annonces et médias' },
+      { name: 'Transactions', description: 'Paiements' },
+      { name: 'Avis', description: 'Notes et commentaires' },
+      { name: 'Signalements', description: 'Modération' },
+      { name: 'Notifications', description: 'Alertes utilisateur' },
+      { name: 'Config', description: 'Paramètres du site (Logo, etc.)' },
     ],
     components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+        },
+      },
       schemas: {
-        // ─── PLAN ───
-        PlanInput: {
+        // ─── UTILISATEUR ───
+        Utilisateur: {
           type: 'object',
-          required: ['nom', 'duree', 'nb_publication'],
           properties: {
-            nom: {
-              type: 'string',
-              example: 'Premium',
-              description: 'Nom du plan',
-            },
-            duree: {
-              type: 'integer',
-              example: 30,
-              description: 'Durée de validité en jours',
-            },
-            nb_publication: {
-              type: 'integer',
-              example: 10,
-              description: 'Nombre maximum de publications autorisées',
-            },
+            id: { type: 'integer' },
+            nom: { type: 'string' },
+            prenom: { type: 'string' },
+            pseudonyme: { type: 'string' },
+            age: { type: 'integer' },
+            mail: { type: 'string' },
+            role: { type: 'string', enum: ['client', 'escort', 'admin'] },
+            statut: { type: 'string', enum: ['actif', 'suspendu', 'banni'] },
           },
         },
+        // ─── ESCORT ───
+        Escort: {
+          type: 'object',
+          properties: {
+            id: { type: 'integer' },
+            utilisateur_id: { type: 'integer' },
+            url_image_profil: { type: 'string' },
+            localisation_id: { type: 'integer' },
+            tarif: { type: 'number' },
+            disponible: { type: 'boolean' },
+            verified: { type: 'string', enum: ['non_soumis', 'en_attente', 'vérifié', 'rejeté'] },
+          },
+        },
+        // ─── PLAN ───
         Plan: {
           type: 'object',
           properties: {
-            id: { type: 'integer', example: 1 },
-            nom: { type: 'string', example: 'Premium' },
-            duree: { type: 'integer', example: 30 },
-            nb_publication: { type: 'integer', example: 10 },
+            id: { type: 'integer' },
+            nom: { type: 'string' },
+            nb_publications: { type: 'integer' },
+            duree_jours: { type: 'integer' },
+            prix: { type: 'number' },
           },
         },
-        // ─── SUBSCRIPTION ───
-        SubscriptionInput: {
-          type: 'object',
-          required: ['escortId', 'planId', 'montant', 'moyen_payement'],
-          properties: {
-            escortId: {
-              type: 'integer',
-              example: 1,
-              description: 'ID de l\'escort',
-            },
-            planId: {
-              type: 'integer',
-              example: 1,
-              description: 'ID du plan choisi',
-            },
-            montant: {
-              type: 'number',
-              example: 5000,
-              description: 'Montant en XAF',
-            },
-            moyen_payement: {
-              type: 'string',
-              enum: ['mobile_money', 'orange_money', 'mtn_momo', 'card'],
-              example: 'orange_money',
-              description: 'Moyen de paiement',
-            },
-          },
-        },
-        Subscription: {
+        // ─── ABONNEMENT ───
+        AbonnementPlan: {
           type: 'object',
           properties: {
-            id: { type: 'integer', example: 1 },
-            date_debut: { type: 'string', format: 'date', example: '2026-04-28' },
-            date_fin: { type: 'string', format: 'date', example: '2026-05-28' },
-            montant: { type: 'number', example: 5000 },
-            status: { type: 'string', example: 'active' },
-            moyen_payement: { type: 'string', example: 'orange_money' },
-            id_escort: { type: 'integer', example: 1 },
-            id_plan: { type: 'integer', example: 1 },
-            plan_nom: { type: 'string', example: 'Premium' },
-            plan_duree: { type: 'integer', example: 30 },
-            plan_nb_publication: { type: 'integer', example: 10 },
+            id: { type: 'integer' },
+            escort_id: { type: 'integer' },
+            plan_id: { type: 'integer' },
+            date_debut: { type: 'string', format: 'date' },
+            date_fin: { type: 'string', format: 'date' },
+            statut: { type: 'string', enum: ['actif', 'expiré', 'annulé'] },
           },
         },
         // ─── PUBLICATION ───
-        PublicationInput: {
-          type: 'object',
-          required: ['titre', 'description', 'id_escort'],
-          properties: {
-            titre: {
-              type: 'string',
-              example: 'Disponible ce soir à Douala',
-              description: 'Titre de la publication (max 255 caractères)',
-            },
-            description: {
-              type: 'string',
-              example: 'Je suis disponible ce soir pour des rencontres...',
-              description: 'Description détaillée',
-            },
-            id_categorie: {
-              type: 'integer',
-              example: 1,
-              description: 'ID de la catégorie (optionnel)',
-              nullable: true,
-            },
-            id_escort: {
-              type: 'integer',
-              example: 1,
-              description: 'ID de l\'escort',
-            },
-          },
-        },
         Publication: {
           type: 'object',
           properties: {
-            id: { type: 'integer', example: 1 },
-            titre: { type: 'string', example: 'Disponible ce soir à Douala' },
+            id: { type: 'integer' },
+            titre: { type: 'string' },
             description: { type: 'string' },
-            status: { type: 'string', example: 'active' },
-            id_categorie: { type: 'integer', nullable: true },
-            id_escort: { type: 'integer', example: 1 },
-            categorie_nom: { type: 'string', nullable: true },
-            escort_pseudo: { type: 'string', example: 'Bella237' },
+            statut: { type: 'string', enum: ['actif', 'inactif'] },
+            montant: { type: 'number' },
+            vh_publication: { type: 'integer' },
+          },
+        },
+        // ─── MEDIA ───
+        PublicationMedia: {
+          type: 'object',
+          properties: {
+            id: { type: 'integer' },
+            publication_id: { type: 'integer' },
+            url: { type: 'string' },
+            ordre: { type: 'integer' },
+          },
+        },
+        // ─── TRANSACTION ───
+        Transaction: {
+          type: 'object',
+          properties: {
+            id: { type: 'integer' },
+            escort_id: { type: 'integer' },
+            montant: { type: 'number' },
+            statut: { type: 'string', enum: ['en_attente', 'validé', 'échoué', 'remboursé'] },
+            reference_paiement: { type: 'string' },
           },
         },
         // ─── RÉPONSES STANDARD ───
@@ -183,7 +156,7 @@ const swaggerOptions = {
       },
     },
   },
-  apis: ['./src/modules/**/*.controller.js'],
+  apis: ['./src/modules/**/*.controller.js', './src/app.js'],
 };
 
 const swaggerSpec = swaggerJsdoc(swaggerOptions);

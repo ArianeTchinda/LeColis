@@ -1,16 +1,26 @@
 const planService = require('./plan.service');
 const asyncHandler = require('../../shares/middleware/asyncHandler');
 
-// ──────────────────────────────────────────────
-// CONTROLLER PLAN — Juste API, aucune logique
-// Reçoit request → appelle service → retourne response
-// ──────────────────────────────────────────────
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     PlanInput:
+ *       type: object
+ *       required: [nom, nb_publications, duree_jours, prix]
+ *       properties:
+ *         nom: { type: string }
+ *         nb_publications: { type: integer }
+ *         duree_jours: { type: integer }
+ *         prix: { type: number }
+ *         description: { type: string }
+ */
 
 /**
  * @swagger
  * /api/v1/plans:
  *   get:
- *     summary: Récupère tous les plans disponibles
+ *     summary: Recuperer tous les plans disponibles
  *     tags: [Plans]
  *     responses:
  *       200:
@@ -21,7 +31,7 @@ const getAll = asyncHandler(async (req, res) => {
   res.status(200).json({
     status: 'success',
     results: plans.length,
-    data: { plans },
+    data: plans,
   });
 });
 
@@ -29,7 +39,7 @@ const getAll = asyncHandler(async (req, res) => {
  * @swagger
  * /api/v1/plans/{id}:
  *   get:
- *     summary: Récupère un plan par ID
+ *     summary: Recuperer un plan par ID
  *     tags: [Plans]
  *     parameters:
  *       - in: path
@@ -39,7 +49,7 @@ const getAll = asyncHandler(async (req, res) => {
  *           type: integer
  *     responses:
  *       200:
- *         description: Détails du plan
+ *         description: Details du plan
  *       404:
  *         description: Plan introuvable
  */
@@ -47,7 +57,7 @@ const getOne = asyncHandler(async (req, res) => {
   const plan = await planService.getPlanById(req.params.id);
   res.status(200).json({
     status: 'success',
-    data: { plan },
+    data: plan,
   });
 });
 
@@ -55,8 +65,10 @@ const getOne = asyncHandler(async (req, res) => {
  * @swagger
  * /api/v1/plans:
  *   post:
- *     summary: Crée un nouveau plan (admin)
+ *     summary: Cree un nouveau plan (admin)
  *     tags: [Plans]
+ *     security:
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -65,13 +77,13 @@ const getOne = asyncHandler(async (req, res) => {
  *             $ref: '#/components/schemas/PlanInput'
  *     responses:
  *       201:
- *         description: Plan créé
+ *         description: Plan cree
  */
 const create = asyncHandler(async (req, res) => {
   const plan = await planService.createPlan(req.body);
   res.status(201).json({
     status: 'success',
-    data: { plan },
+    data: plan,
   });
 });
 
@@ -79,8 +91,10 @@ const create = asyncHandler(async (req, res) => {
  * @swagger
  * /api/v1/plans/{id}:
  *   put:
- *     summary: Met à jour un plan (admin)
+ *     summary: Met a jour un plan (admin)
  *     tags: [Plans]
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -95,7 +109,7 @@ const create = asyncHandler(async (req, res) => {
  *             $ref: '#/components/schemas/PlanInput'
  *     responses:
  *       200:
- *         description: Plan mis à jour
+ *         description: Plan mis a jour
  *       404:
  *         description: Plan introuvable
  */
@@ -103,7 +117,7 @@ const update = asyncHandler(async (req, res) => {
   const plan = await planService.updatePlan(req.params.id, req.body);
   res.status(200).json({
     status: 'success',
-    data: { plan },
+    data: plan,
   });
 });
 
@@ -113,6 +127,8 @@ const update = asyncHandler(async (req, res) => {
  *   delete:
  *     summary: Supprime un plan (admin)
  *     tags: [Plans]
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -121,7 +137,7 @@ const update = asyncHandler(async (req, res) => {
  *           type: integer
  *     responses:
  *       204:
- *         description: Plan supprimé
+ *         description: Plan supprime
  *       404:
  *         description: Plan introuvable
  */

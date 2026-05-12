@@ -1,9 +1,9 @@
-// src/modules/signalisation/signalisation.routes.js
 const express = require('express');
 const router = express.Router();
 const sigCtrl = require('./signalisation.controller');
+const { protect } = require('../../shares/middleware/auth');
 
-router.post('/', sigCtrl.createSignalement);
-router.patch('/:id/assign', sigCtrl.assignAdminToSignalement);
+// Tout le monde peut signaler (si connecté)
+router.post('/', protect, sigCtrl.createSignalement);
 
-module.exports = router; // <--- BIEN VÉRIFIER CETTE LIGNE
+module.exports = router;

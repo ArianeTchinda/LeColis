@@ -1,82 +1,83 @@
-const db = require('../../shares/database/config');
+const db = require('../../shares/config/config');
 
+/**
+ * @swagger
+ * /api/v1/avis:
+ *   post:
+ *     summary: Ajouter un avis sur une escort
+ *     tags: [Avis]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [escort_id, rate]
+ *             properties:
+ *               escort_id: { type: integer }
+ *               rate: { type: integer, minimum: 1, maximum: 5 }
+ *               message: { type: string }
+ *     responses:
+ *       201:
+ *         description: Avis ajoute
+ */
 const addAvis = async (req, res) => {
   try {
-    // 1. On récupère les noms exacts de ton schéma
-    const { id_escort, rate, message } = req.body;
+    const { escort_id, rate, message } = req.body;
+    const utilisateur_id = req.user.id;
 
-    // 2. Validation
-    if (!id_escort || rate === undefined) {
-      return res.status(400).json({ 
-        status: 'error', 
-        message: "L'ID de l'escorte et une note (rate) sont obligatoires." 
-      });
+    if (!escort_id || rate === undefined) {
+      return res.status(400).json({ status: 'error', message: "ID escort et note requis." });
     }
 
-    // 3. Requête SQL avec tes noms de colonnes : message, rate, id_escort
     const query = `
-      INSERT INTO avis (id_escort, rate, message)
-      VALUES ($1, $2, $3)
+      INSERT INTO avis (escort_id, utilisateur_id, rate, message)
+      VALUES ($1, $2, $3, $4)
       RETURNING *;
     `;
     
-    const result = await db.query(query, [id_escort, rate, message]);
-
-    res.status(201).json({
-      status: 'success',
-      data: result.rows[0]
-    });
+    const result = await db.query(query, [escort_id, utilisateur_id, rate, message]);
+    res.status(201).json({ status: 'success', data: result.rows[0] });
 
   } catch (error) {
-    console.error("❌ Erreur addAvis:", error.message);
-    res.status(500).json({ status: 'error', message: "Erreur lors de l'ajout de l'avis." });
+    res.status(500).json({ status: 'error', message: error.message });
   }
 };
 
+/**
+ * @swagger
+ * /api/v1/avis/escort/{escort_id}:
+ *   get:
+ *     summary: Recuperer les avis d'une escort
+ *     tags: [Avis]
+ *     parameters:
+ *       - in: path
+ *         name: escort_id
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200:
+ *         description: Liste des avis
+ */
 const getAvisByEscort = async (req, res) => {
   try {
-    const { id_escort } = req.params;
+    const { escort_id } = req.params;
 
-    // 1. On récupère tous les avis + on calcule la moyenne et le compte en une seule requête SQL
     const query = `
-      SELECT 
-        *, 
-        COUNT(*) OVER() as total_avis,
-        AVG(rate) OVER() as note_moyenne
-      FROM avis 
-      WHERE id_escort = $1
-      ORDER BY date_publication DESC;
+      SELECT a.*, u.pseudonyme as client_pseudo
+      FROM avis a
+      JOIN utilisateur u ON a.utilisateur_id = u.id
+      WHERE a.escort_id = $1
+      ORDER BY a.created_at DESC;
     `;
     
-    const result = await db.query(query, [id_escort]);
+    const result = await db.query(query, [escort_id]);
 
-    if (result.rows.length === 0) {
-      return res.status(200).json({
-        status: 'success',
-        message: "Aucun avis pour cette escorte.",
-        stats: { total: 0, moyenne: 0 },
-        data: []
-      });
-    }
-
-    // 2. On extrait les stats de la première ligne (elles sont identiques partout grâce à OVER())
-    const stats = {
-      total: parseInt(result.rows[0].total_avis),
-      moyenne: parseFloat(result.rows[0].note_moyenne).toFixed(1)
-    };
-
-    // 3. On nettoie les objets pour ne pas renvoyer les colonnes de calcul à chaque ligne
-    const cleanAvis = result.rows.map(({ total_avis, note_moyenne, ...rest }) => rest);
-
-    res.status(200).json({
-      status: 'success',
-      stats: stats,
-      data: cleanAvis
-    });
-
+    res.status(200).json({ status: 'success', data: result.rows });
   } catch (error) {
-    console.error("Erreur getAvisByEscort:", error);
-    res.status(500).json({ status: 'error', message: "Erreur lors de la récupération des avis." });
+    res.status(500).json({ status: 'error', message: error.message });
   }
 };
 

@@ -1,4 +1,5 @@
-# Documentation Technique — LeColis v2.0
+# Documentation Technique — LeColis
+
 
 Cette documentation detaille l'architecture, la configuration et l'utilisation du backend de la plateforme LeColis, migre vers la version 2.0.
 

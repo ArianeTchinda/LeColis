@@ -14,6 +14,15 @@ DROP TABLE IF EXISTS localisation CASCADE;
 DROP TABLE IF EXISTS utilisateur CASCADE;
 DROP TABLE IF EXISTS categorie CASCADE;
 
+DROP TYPE IF EXISTS user_role CASCADE;
+DROP TYPE IF EXISTS user_status CASCADE;
+DROP TYPE IF EXISTS verification_status CASCADE;
+DROP TYPE IF EXISTS subscription_status CASCADE;
+DROP TYPE IF EXISTS publication_status CASCADE;
+DROP TYPE IF EXISTS transaction_status CASCADE;
+DROP TYPE IF EXISTS report_reason CASCADE;
+DROP TYPE IF EXISTS report_status CASCADE;
+
 -- 1.1 Table : utilisateur
 CREATE TYPE user_role AS ENUM('client', 'escort', 'admin');
 CREATE TYPE user_status AS ENUM('actif', 'suspendu', 'banni');
@@ -28,6 +37,7 @@ CREATE TABLE utilisateur (
     telephone VARCHAR(20),
     mail VARCHAR(191) UNIQUE NOT NULL,
     password VARCHAR(255) NOT NULL,
+    refresh_token VARCHAR(500),
     role user_role DEFAULT 'client',
     statut user_status DEFAULT 'actif',
     created_at TIMESTAMP DEFAULT NOW(),
@@ -43,7 +53,7 @@ CREATE TABLE localisation (
 );
 
 -- 1.3 Table : escort
-CREATE TYPE verification_status AS ENUM('non_soumis', 'en_attente', 'vérifié', 'rejeté');
+CREATE TYPE verification_status AS ENUM('non_soumis', 'en_attente', 'verifie', 'rejete');
 
 CREATE TABLE escort (
     id SERIAL PRIMARY KEY,
@@ -63,7 +73,7 @@ CREATE TABLE escort (
 -- 1.4 Table : plan
 CREATE TABLE plan (
     id SERIAL PRIMARY KEY,
-    nom VARCHAR(100) NOT NULL,
+    nom VARCHAR(100) UNIQUE NOT NULL,
     description TEXT,
     nb_publications INTEGER NOT NULL,
     duree_jours INTEGER NOT NULL,
@@ -126,7 +136,7 @@ CREATE TABLE avis (
 );
 
 -- 1.9 Table : transaction
-CREATE TYPE transaction_status AS ENUM('en_attente', 'validé', 'échoué', 'remboursé');
+CREATE TYPE transaction_status AS ENUM('en_attente', 'valide', 'echoue', 'rembourse');
 
 CREATE TABLE transaction (
     id SERIAL PRIMARY KEY,
@@ -150,8 +160,8 @@ CREATE TABLE notification (
 );
 
 -- 1.11 Table : signalement
-CREATE TYPE report_reason AS ENUM('faux_compte', 'spam', 'contenu_inapproprié', 'autre');
-CREATE TYPE report_status AS ENUM('en_attente', 'traité', 'rejeté');
+CREATE TYPE report_reason AS ENUM('faux_compte', 'spam', 'contenu_inapproprie', 'autre');
+CREATE TYPE report_status AS ENUM('en_attente', 'traite', 'rejete');
 
 CREATE TABLE signalement (
     id SERIAL PRIMARY KEY,

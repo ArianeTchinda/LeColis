@@ -79,7 +79,7 @@ Documentation technique alignée sur la version 2.0 du projet.
             localisation_id: { type: 'integer' },
             tarif: { type: 'number' },
             disponible: { type: 'boolean' },
-            verified: { type: 'string', enum: ['non_soumis', 'en_attente', 'vérifié', 'rejeté'] },
+            verified: { type: 'string', enum: ['non_soumis', 'en_attente', 'verifie', 'rejete'] },
           },
         },
         // ─── PLAN ───
@@ -102,7 +102,7 @@ Documentation technique alignée sur la version 2.0 du projet.
             plan_id: { type: 'integer' },
             date_debut: { type: 'string', format: 'date' },
             date_fin: { type: 'string', format: 'date' },
-            statut: { type: 'string', enum: ['actif', 'expiré', 'annulé'] },
+            statut: { type: 'string', enum: ['actif', 'expire', 'annule'] },
           },
         },
         // ─── PUBLICATION ───
@@ -134,7 +134,7 @@ Documentation technique alignée sur la version 2.0 du projet.
             id: { type: 'integer' },
             escort_id: { type: 'integer' },
             montant: { type: 'number' },
-            statut: { type: 'string', enum: ['en_attente', 'validé', 'échoué', 'remboursé'] },
+            statut: { type: 'string', enum: ['en_attente', 'valide', 'echoue', 'rembourse'] },
             reference_paiement: { type: 'string' },
           },
         },

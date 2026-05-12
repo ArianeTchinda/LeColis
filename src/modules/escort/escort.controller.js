@@ -136,6 +136,8 @@ const registerEscort = async (req, res) => {
  *       200:
  *         description: Connexion réussie
  */
+const { generateTokens } = require('../../shares/utils/auth');
+
 const loginEscort = async (req, res) => {
   try {
     const { mail, password } = req.body;
@@ -154,15 +156,12 @@ const loginEscort = async (req, res) => {
       return res.status(401).json({ status: 'error', message: "Identifiants incorrects." });
     }
 
-    const token = jwt.sign(
-      { id: user.id, role: 'escort' },
-      process.env.JWT_SECRET,
-      { expiresIn: '168h' }
-    );
+    const { accessToken, refreshToken } = await generateTokens(user);
 
     res.status(200).json({
       status: 'success',
-      token,
+      token: accessToken,
+      refreshToken,
       data: { id: user.id, pseudonyme: user.pseudonyme, mail: user.mail }
     });
 

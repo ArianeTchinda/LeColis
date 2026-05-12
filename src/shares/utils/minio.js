@@ -17,21 +17,23 @@ const ensureBucketExists = async () => {
         const exists = await minioClient.bucketExists(bucketName);
         if (!exists) {
             await minioClient.makeBucket(bucketName, 'us-east-1');
-            console.log(`✅ Bucket '${bucketName}' créé avec succès.`);
+            console.log(`Bucket '${bucketName}' cree avec succes.`);
         }
     } catch (err) {
-        console.error(`❌ Erreur lors de la vérification du bucket Minio:`, err.message);
+        console.error(`Erreur lors de la verification du bucket Minio:`, err.message);
     }
 };
+
+// Lancer la verification au demarrage
+ensureBucketExists();
 
 /**
  * Upload un fichier vers Minio
  * @param {Object} file Objet fichier (multer)
  * @param {String} folder Dossier de destination dans le bucket
- * @returns {String} Le nom du fichier enregistré
+ * @returns {String} Le nom du fichier enregistre
  */
 const uploadFile = async (file, folder = 'others') => {
-    await ensureBucketExists();
     const fileName = `${folder}/${Date.now()}-${file.originalname}`;
     
     await minioClient.putObject(bucketName, fileName, file.buffer || file.path, {
@@ -42,13 +44,12 @@ const uploadFile = async (file, folder = 'others') => {
 };
 
 /**
- * Récupère l'URL d'un fichier (Presigned URL ou URL publique)
+ * Recupere l'URL d'un fichier (Presigned URL ou URL publique)
  * @param {String} fileName Nom du fichier dans le bucket
  * @returns {Promise<String>}
  */
 const getFileUrl = async (fileName) => {
     if (!fileName) return null;
-    // On génère une URL valide 24h. Si le bucket est public, on peut simplifier.
     return await minioClient.presignedGetObject(bucketName, fileName, 24 * 60 * 60);
 };
 
@@ -61,7 +62,7 @@ const deleteFile = async (fileName) => {
     try {
         await minioClient.removeObject(bucketName, fileName);
     } catch (err) {
-        console.warn(`⚠️ Impossible de supprimer le fichier Minio: ${fileName}`, err.message);
+        console.warn(`Impossible de supprimer le fichier Minio: ${fileName}`, err.message);
     }
 };
 

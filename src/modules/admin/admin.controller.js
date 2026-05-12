@@ -79,13 +79,15 @@ const registerAdmin = async (req, res) => {
  *       401:
  *         description: Identifiants incorrects
  */
+const { generateTokens } = require('../../shares/utils/auth');
+
 const loginAdmin = async (req, res) => {
   try {
     const { email, password } = req.body;
 
     const result = await db.query('SELECT * FROM utilisateur WHERE mail = $1 AND role = \'admin\'', [email]);
     if (result.rows.length === 0) {
-      return res.status(401).json({ status: 'error', message: "Identifiants incorrects ou non autorisé." });
+      return res.status(401).json({ status: 'error', message: "Identifiants incorrects ou non autorise." });
     }
 
     const admin = result.rows[0];
@@ -95,19 +97,17 @@ const loginAdmin = async (req, res) => {
       return res.status(401).json({ status: 'error', message: "Identifiants incorrects." });
     }
 
-    const token = jwt.sign(
-      { id: admin.id, role: 'admin' }, 
-      process.env.JWT_SECRET, 
-      { expiresIn: '24h' }
-    );
+    const { accessToken, refreshToken } = await generateTokens(admin);
 
     res.status(200).json({
       status: 'success',
-      token,
+      token: accessToken,
+      refreshToken,
       admin: { id: admin.id, nom: admin.nom, email: admin.mail, role: admin.role }
     });
 
   } catch (error) {
+    console.error("Erreur Login Admin:", error);
     res.status(500).json({ status: 'error', message: "Erreur lors de la connexion." });
   }
 };

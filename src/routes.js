@@ -10,10 +10,12 @@ const signalisationRoutes = require('./modules/signalisation/signalisation.route
 const notificationRoutes = require('./modules/notification/notification.routes');
 const configRoutes = require('./modules/config/config.routes');
 const transactionRoutes = require('./modules/transaction/transaction.routes');
+const authRoutes = require('./modules/auth/auth.routes');
 
 const router = express.Router();
 
-// ─── Montage des routes par module ───
+// --- Montage des routes par module ---
+router.use('/auth', authRoutes);
 router.use('/plans', planRoutes);
 router.use('/subscriptions', subscriptionRoutes);
 router.use('/publications', publicationRoutes);

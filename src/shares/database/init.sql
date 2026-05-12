@@ -83,6 +83,7 @@ CREATE TABLE signalisation (
 CREATE TABLE notification (
     id SERIAL PRIMARY KEY,
     message TEXT,
+    is_read BOOLEAN DEFAULT FALSE
     id_escort INTEGER REFERENCES escort(id) ON DELETE CASCADE,
     id_admin INTEGER REFERENCES admin(id) ON DELETE SET NULL
 );

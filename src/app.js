@@ -6,12 +6,45 @@ const { initBucket } = require('./shares/services/minio.service');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const cors = require('cors');
+const swaggerJsDoc = require('swagger-jsdoc');
+const swaggerUi = require('swagger-ui-express');
+
+const swaggerOptions = {
+  swaggerDefinition: {
+    openapi: '3.0.0',
+    info: {
+      title: 'API LeColis',
+      version: '1.0.0',
+      description: 'Documentation de l\'API pour le projet LeColis (DEV 2)',
+      contact: {
+        name: 'BlackFlower'
+      },
+      servers: [{ url: 'http://localhost:5000' }]
+    },
+    components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+        }
+      }
+    }
+  },
+  // Chemin vers tes fichiers de routes pour extraire la doc
+  apis: ['./src/modules/**/*.routes.js'], 
+};
+
 
 
 initBucket();
 
 // Initialisation Express
 const app = express();
+
+// Swagger docs (build after app creation to avoid referencing `app` before init)
+const swaggerDocs = swaggerJsDoc(swaggerOptions);
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocs));
 
 // CRÉATION DU SERVEUR HTTP (Indispensable pour Socket.io)
 const server = http.createServer(app); 

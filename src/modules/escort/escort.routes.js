@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const upload = require('../../shares/middleware/upload');
+const upload = require('../../shares/middleware/multerConfig');
 const escortController = require('./escort.controller');
 const { protect } = require('../../shares/middleware/auth');
 

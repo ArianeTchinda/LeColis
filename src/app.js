@@ -1,10 +1,14 @@
+require('dotenv').config();
 const express = require('express');
 const http = require('http'); // AJOUTÉ
 const { Server } = require('socket.io');
+const { initBucket } = require('./shares/services/minio.service');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const cors = require('cors');
-require('dotenv').config();
+
+
+initBucket();
 
 // Initialisation Express
 const app = express();

@@ -1,11 +1,11 @@
 const subscriptionRepository = require('./subscription.repository');
 const planRepository = require('../plan/plan.repository');
 const paymentService = require('../payment/payment.service');
-const { executeTransaction } = require('../../shared/database/transaction');
-const { addDays, isExpired } = require('../../shared/utils/date');
-const { AppError } = require('../../shared/middleware/errorHandler');
+const { executeTransaction } = require('../../shares/database/transaction');
+const { addDays, isExpired } = require('../../shares/utils/date');
+const { AppError } = require('../../shares/middleware/errorHandler');
 const { SUBSCRIPTION_STATUS } = require('./subscription.constants');
-const logger = require('../../shared/utils/logger');
+const logger = require('../../shares/utils/logger');
 
 // ──────────────────────────────────────────────────────────
 // SERVICE SUBSCRIPTION — MODULE CENTRAL 🔥

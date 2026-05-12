@@ -19,10 +19,10 @@ const swaggerOptions = {
 - **Publications** : Annonces des escorts (vérification abonnement + quota)
 
 ### Règles métier critiques :
-- ❌ Publier sans abonnement actif = INTERDIT
-- ❌ Dépasser le quota du plan = INTERDIT
-- ❌ Créer une souscription sans paiement = INTERDIT
-- ✅ Vérification automatique à chaque publication
+- Publier sans abonnement actif = INTERDIT
+- Dépasser le quota du plan = INTERDIT
+- Créer une souscription sans paiement = INTERDIT
+- Vérification automatique à chaque publication
 
 ### Flow complet :
 1. Admin crée des plans

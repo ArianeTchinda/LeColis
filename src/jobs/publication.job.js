@@ -1,6 +1,6 @@
 const publicationRepository = require('../modules/publication/publication.repository');
 const subscriptionRepository = require('../modules/subscription/subscription.repository');
-const logger = require('../shared/utils/logger');
+const logger = require('../shares/utils/logger');
 
 /**
  * Job de désactivation des publications quand la souscription expire.

@@ -1,5 +1,5 @@
 const planService = require('./plan.service');
-const asyncHandler = require('../../shared/middleware/asyncHandler');
+const asyncHandler = require('../../shares/middleware/asyncHandler');
 
 // ──────────────────────────────────────────────
 // CONTROLLER PLAN — Juste API, aucune logique

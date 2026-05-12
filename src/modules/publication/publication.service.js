@@ -1,9 +1,9 @@
 const publicationRepository = require('./publication.repository');
 const subscriptionService = require('../subscription/subscription.service');
-const { executeTransaction } = require('../../shared/database/transaction');
-const { AppError } = require('../../shared/middleware/errorHandler');
+const { executeTransaction } = require('../../shares/database/transaction');
+const { AppError } = require('../../shares/middleware/errorHandler');
 const { PUBLICATION_STATUS } = require('./publication.constants');
-const logger = require('../../shared/utils/logger');
+const logger = require('../../shares/utils/logger');
 
 // ──────────────────────────────────────────────────────────
 // SERVICE PUBLICATION — LE PLUS CRITIQUE 🔥

@@ -1,7 +1,7 @@
 const paymentGateway = require('./payment.gateway');
 const paymentRepository = require('./payment.repository');
-const logger = require('../../shared/utils/logger');
-const { AppError } = require('../../shared/middleware/errorHandler');
+const logger = require('../../shares/utils/logger');
+const { AppError } = require('../../shares/middleware/errorHandler');
 
 // ──────────────────────────────────────────────
 // SERVICE PAYMENT — Validation financière

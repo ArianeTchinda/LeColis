@@ -3,23 +3,23 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const cors = require('cors');
 const cron = require('node-cron');
-const swaggerSpec = require('./shared/config/swagger.js');
+const swaggerSpec = require('./shares/config/swagger.js');
 const swaggerUi = require('swagger-ui-express');
 require('dotenv').config();
 
 // Connexion DB
-const db = require('./shared/database/db');
+const db = require('./shares/database/db');
 
 // Routes centralisées
 const routes = require('./routes');
 
 // Middleware d'erreur global
-const { errorHandler } = require('./shared/middleware/errorHandler');
+const { errorHandler } = require('./shares/middleware/errorHandler');
 
 // Jobs CRON
 const { runExpireSubscriptions } = require('./jobs/subscription.job');
 
-const logger = require('./shared/utils/logger');
+const logger = require('./shares/utils/logger');
 
 const app = express();
 
@@ -53,7 +53,7 @@ app.get('/api-docs.json', (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   res.send(swaggerSpec);
 });
-*/ 
+*/
 
 // ═══════════════════════════════════════════════
 // ROUTES

@@ -1,6 +1,6 @@
 const planRepository = require('./plan.repository');
-const { AppError } = require('../../shared/middleware/errorHandler');
-const logger = require('../../shared/utils/logger');
+const { AppError } = require('../../shares/middleware/errorHandler');
+const logger = require('../../shares/utils/logger');
 
 // ──────────────────────────────────────────────
 // SERVICE PLAN — Table statique de configuration

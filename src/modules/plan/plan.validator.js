@@ -1,4 +1,4 @@
-const { AppError } = require('../../shared/middleware/errorHandler');
+const { AppError } = require('../../shares/middleware/errorHandler');
 
 /**
  * Valide la création / mise à jour d'un plan.

@@ -1,4 +1,4 @@
-const logger = require('../../shared/utils/logger');
+const logger = require('../../shares/utils/logger');
 
 // ──────────────────────────────────────────────
 // PAYMENT GATEWAY — Abstraction du provider

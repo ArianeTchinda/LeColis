@@ -1,7 +1,7 @@
 const subscriptionService = require('../modules/subscription/subscription.service');
 const publicationService = require('../modules/publication/publication.service');
 const subscriptionRepository = require('../modules/subscription/subscription.repository');
-const logger = require('../shared/utils/logger');
+const logger = require('../shares/utils/logger');
 
 // ──────────────────────────────────────────────
 // JOB CRON — Expiration automatique

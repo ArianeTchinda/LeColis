@@ -1,4 +1,4 @@
-const { AppError } = require('../../shared/middleware/errorHandler');
+const { AppError } = require('../../shares/middleware/errorHandler');
 const { PAYMENT_METHODS } = require('./subscription.constants');
 
 /**

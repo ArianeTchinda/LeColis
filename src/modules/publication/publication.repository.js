@@ -1,4 +1,4 @@
-const pool = require('../../shared/database/db');
+const pool = require('../../shares/database/db');
 
 // ──────────────────────────────────────────────────────────
 // REPOSITORY PUBLICATION — SQL pur, aucune logique métier

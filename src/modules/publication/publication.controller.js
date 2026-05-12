@@ -1,5 +1,5 @@
 const publicationService = require('./publication.service');
-const asyncHandler = require('../../shared/middleware/asyncHandler');
+const asyncHandler = require('../../shares/middleware/asyncHandler');
 
 // ──────────────────────────────────────────────
 // CONTROLLER PUBLICATION — Juste API

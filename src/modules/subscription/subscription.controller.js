@@ -1,5 +1,5 @@
 const subscriptionService = require('./subscription.service');
-const asyncHandler = require('../../shared/middleware/asyncHandler');
+const asyncHandler = require('../../shares/middleware/asyncHandler');
 
 // ──────────────────────────────────────────────
 // CONTROLLER SUBSCRIPTION — Juste API

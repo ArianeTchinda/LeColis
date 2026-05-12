@@ -3,13 +3,21 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/models/abonnement_model.dart';
 import '../../../../core/models/transaction_model.dart';
-import '/core/models/escort_model.dart';   // ← Ajoute cette ligne
+import '/core/models/escort_model.dart';
 import './widgets/transaction_card.dart';
 import './screens/payment_selection_screen.dart';
 
 class AbonnementsTab extends StatefulWidget {
   final ValueNotifier<String>? searchQuery;
-  const AbonnementsTab({super.key, this.searchQuery});
+
+  /// ← NOUVEAU : callback fourni par HomeScreen pour basculer vers l'onglet Profil
+  final VoidCallback? onGoToLogin;
+
+  const AbonnementsTab({
+    super.key,
+    this.searchQuery,
+    this.onGoToLogin, // ← NOUVEAU
+  });
 
   @override
   State<AbonnementsTab> createState() => _AbonnementsTabState();
@@ -18,15 +26,11 @@ class AbonnementsTab extends StatefulWidget {
 class _AbonnementsTabState extends State<AbonnementsTab>
     with SingleTickerProviderStateMixin {
   late TabController _innerTabController;
-  final SessionManager _session = SessionManager();   // ← AJOUTÉ
+  final SessionManager _session = SessionManager();
 
-     // ── ÉTAT CONNEXION (dynamique) ─────────────────────────────
   bool get estConnecte => _session.estConnecte;
-
-  // Temporaire : on utilise 'p1' (Basique) tant que planActif n'existe pas dans EscortModel
   String get activePlanId => 'p1';
 
-  // ── PLANS ───────────────────────────────────────────────
   final List<PlanAbonnement> _plans = [
     const PlanAbonnement(
       id: 'p1', nom: 'Basique',
@@ -51,7 +55,6 @@ class _AbonnementsTabState extends State<AbonnementsTab>
     ),
   ];
 
-  // ── HISTORIQUE MOCK ─────────────────────────────────────
   final List<TransactionModel> _transactions = [
     TransactionModel(id: 't1', planNom: 'Standard', montant: 5000,
       date: DateTime(2025, 5, 6), statut: TransactionStatus.succes, methodePaiement: 'Orange Money'),
@@ -61,11 +64,11 @@ class _AbonnementsTabState extends State<AbonnementsTab>
 
   PlanAbonnement get _planActuel => _plans.firstWhere((p) => p.id == activePlanId);
 
- @override
+  @override
   void initState() {
     super.initState();
     _innerTabController = TabController(length: 3, vsync: this);
-    _session.addListener(_onSessionChange);   // ← Écoute les changements
+    _session.addListener(_onSessionChange);
   }
 
   @override
@@ -85,42 +88,14 @@ class _AbonnementsTabState extends State<AbonnementsTab>
     ));
   }
 
-  // ── NOUVELLE FONCTION À AJOUTER ─────────────────────────────
-  void _showLoginRequired() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppColors.surfaceElevated,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text("Connexion requise", 
-               style: TextStyle(fontWeight: FontWeight.bold)),
-        content: const Text(
-          "Vous devez être connecté pour souscrire à un abonnement.",
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Annuler"),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primaryPink,
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () {
-              Navigator.pop(context);
-              Navigator.pushNamed(context, '/login');
-            },
-            child: const Text("Se connecter"),
-          ),
-        ],
-      ),
-    );
+  /// ← MODIFIÉ : au lieu de pushNamed('/login'), on appelle le callback
+  /// qui fait basculer HomeScreen sur l'onglet Profil (index 2)
+  void _goToLogin() {
+    widget.onGoToLogin?.call();
   }
 
   String _fmtDate(DateTime d) =>
       '${d.day.toString().padLeft(2,'0')}/${d.month.toString().padLeft(2,'0')}/${d.year}';
-
 
   @override
   Widget build(BuildContext context) {
@@ -163,7 +138,7 @@ class _AbonnementsTabState extends State<AbonnementsTab>
                 style: TextStyle(fontSize: 13, color: AppColors.primaryPinkSoft))),
               const SizedBox(width: 8),
               GestureDetector(
-                onTap: () => Navigator.pushNamed(context, '/login'),
+                onTap: _goToLogin, // ← MODIFIÉ
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(color: AppColors.primaryPink, borderRadius: BorderRadius.circular(10)),
@@ -218,7 +193,7 @@ class _AbonnementsTabState extends State<AbonnementsTab>
     );
   }
 
-  // ── VUE 1 : PLANS ─────────────────────────────────────────
+  // ── VUE 1 : PLANS
   Widget _buildPlansView(bool isDesktop, double hPad) {
     return ValueListenableBuilder<String>(
       valueListenable: widget.searchQuery ?? ValueNotifier(''),
@@ -235,30 +210,30 @@ class _AbonnementsTabState extends State<AbonnementsTab>
           ]));
         }
 
-                return SingleChildScrollView(
+        return SingleChildScrollView(
           padding: EdgeInsets.fromLTRB(hPad, 16, hPad, 100),
           child: isDesktop
             ? Row(crossAxisAlignment: CrossAxisAlignment.start, children: filtered.map((plan) =>
                 Expanded(child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   child: _PlanCard(
-                    plan: plan, 
+                    plan: plan,
                     isActuel: plan.id == activePlanId,
-                    estConnecte: estConnecte, 
-                    onTap: () => estConnecte 
-                        ? _allerAuPaiement(plan) 
-                        : _showLoginRequired(),     // ← MODIFIÉ
+                    estConnecte: estConnecte,
+                    onTap: () => estConnecte
+                        ? _allerAuPaiement(plan)
+                        : _goToLogin(), // ← MODIFIÉ
                   ),
                 ))).toList())
             : Column(children: filtered.map((plan) => Padding(
                 padding: const EdgeInsets.only(bottom: 16),
                 child: _PlanCard(
-                  plan: plan, 
+                  plan: plan,
                   isActuel: plan.id == activePlanId,
-                  estConnecte: estConnecte, 
-                  onTap: () => estConnecte 
-                      ? _allerAuPaiement(plan) 
-                      : _showLoginRequired(),     // ← MODIFIÉ
+                  estConnecte: estConnecte,
+                  onTap: () => estConnecte
+                      ? _allerAuPaiement(plan)
+                      : _goToLogin(), // ← MODIFIÉ
                 ),
               )).toList()),
         );
@@ -266,7 +241,7 @@ class _AbonnementsTabState extends State<AbonnementsTab>
     );
   }
 
-  // ── VUE 2 : MON ABONNEMENT ────────────────────────────────
+  // ── VUE 2 : MON ABONNEMENT
   Widget _buildAbonnementActifView(bool isDesktop, double hPad) {
     if (!estConnecte) return _murConnexion();
     final plan      = _planActuel;
@@ -279,7 +254,6 @@ class _AbonnementsTabState extends State<AbonnementsTab>
     return SingleChildScrollView(
       padding: EdgeInsets.fromLTRB(isDesktop ? 80 : hPad, 16, isDesktop ? 80 : hPad, 100),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        // Carte statut
         Container(
           width: double.infinity, padding: const EdgeInsets.all(22),
           decoration: BoxDecoration(
@@ -334,20 +308,15 @@ class _AbonnementsTabState extends State<AbonnementsTab>
                 valueColor: AlwaysStoppedAnimation(color), minHeight: 6)),
           ]),
         ),
-
         const SizedBox(height: 24),
-
         Text('Actions disponibles', style: GoogleFonts.cormorantGaramond(
           fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
         const SizedBox(height: 12),
-
         if (plan.id != 'p1')
           _bouton(icon: Icons.refresh_rounded, label: 'Renouveler le plan ${plan.nom}',
             sousTitre: 'Commencera après expiration', color: color,
             onTap: () => _allerAuPaiement(plan)),
-
         const SizedBox(height: 10),
-
         ..._plans.where((p) => _plans.indexOf(p) > _plans.indexOf(plan)).map((p) =>
           Padding(padding: const EdgeInsets.only(bottom: 10),
             child: _bouton(icon: Icons.arrow_upward_rounded,
@@ -358,7 +327,7 @@ class _AbonnementsTabState extends State<AbonnementsTab>
     );
   }
 
-  // ── VUE 3 : HISTORIQUE ────────────────────────────────────
+  // ── VUE 3 : HISTORIQUE
   Widget _buildHistoriqueView(bool isDesktop, double hPad) {
     if (!estConnecte) return _murConnexion();
 
@@ -378,7 +347,7 @@ class _AbonnementsTabState extends State<AbonnementsTab>
     );
   }
 
-  // ── HELPERS UI ────────────────────────────────────────────
+  // ── HELPERS UI
   Widget _row(IconData icon, String label, String value, Color color) => Row(children: [
     Icon(icon, size: 14, color: color),
     const SizedBox(width: 10),
@@ -413,6 +382,7 @@ class _AbonnementsTabState extends State<AbonnementsTab>
     );
   }
 
+  /// Mur affiché dans "Mon abonnement" et "Historique" quand non connecté
   Widget _murConnexion() => Center(child: Padding(
     padding: const EdgeInsets.all(32),
     child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -428,7 +398,7 @@ class _AbonnementsTabState extends State<AbonnementsTab>
         style: TextStyle(fontSize: 14, color: AppColors.textSecondary)),
       const SizedBox(height: 24),
       GestureDetector(
-        onTap: () => Navigator.pushNamed(context, '/login'),
+        onTap: _goToLogin, // ← MODIFIÉ
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
           decoration: BoxDecoration(
@@ -481,7 +451,6 @@ class _PlanCard extends StatelessWidget {
             padding: const EdgeInsets.all(20),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
-              // Icône + nom + badge actif
               Row(children: [
                 Container(padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(color: color.withOpacity(0.12), shape: BoxShape.circle),
@@ -507,7 +476,6 @@ class _PlanCard extends StatelessWidget {
 
               const SizedBox(height: 14),
 
-              // Prix
               RichText(text: TextSpan(children: [
                 TextSpan(text: plan.prix == 0 ? 'Gratuit' : '${plan.prix}',
                   style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: color,
@@ -525,7 +493,6 @@ class _PlanCard extends StatelessWidget {
               Divider(color: AppColors.divider.withOpacity(0.6)),
               const SizedBox(height: 10),
 
-              // Avantages
               ...plan.avantages.map((a) => Padding(
                 padding: const EdgeInsets.only(bottom: 7),
                 child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -537,8 +504,6 @@ class _PlanCard extends StatelessWidget {
               )),
 
               const SizedBox(height: 18),
-
-              // CTA
               _buildCTA(color, isBasique, context),
             ]),
           ),
@@ -548,7 +513,6 @@ class _PlanCard extends StatelessWidget {
   }
 
   Widget _buildCTA(Color color, bool isBasique, BuildContext context) {
-    // Basique actif → pas d'action
     if (isBasique && isActuel) {
       return Container(
         width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 13),
@@ -559,20 +523,21 @@ class _PlanCard extends StatelessWidget {
       );
     }
 
-    // Non connecté
+    // Non connecté → bouton qui remonte via onTap (déjà branché sur _goToLogin)
     if (!estConnecte) {
       return GestureDetector(
-        onTap: () => Navigator.pushNamed(context, '/login'),
+        onTap: onTap, // ← pointe sur _goToLogin via le parent
         child: Container(
           width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 13),
           decoration: BoxDecoration(
-            color: AppColors.surfaceElevated, borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppColors.divider)),
+            color: AppColors.primaryPink.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppColors.primaryPink.withOpacity(0.35))),
           child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Icon(Icons.lock_outline_rounded, size: 14, color: AppColors.textMuted),
+            Icon(Icons.login_rounded, size: 14, color: AppColors.primaryPink),
             SizedBox(width: 6),
             Text('Connectez-vous pour souscrire',
-              style: TextStyle(color: AppColors.textMuted, fontSize: 12, fontWeight: FontWeight.w500)),
+              style: TextStyle(color: AppColors.primaryPink, fontSize: 12, fontWeight: FontWeight.w600)),
           ]),
         ),
       );

@@ -6,6 +6,7 @@ import 'tabs/publications/publications_tab.dart';
 import 'tabs/abonnements/abonnements_tab.dart';
 import 'tabs/profil/profil_tab.dart';
 import '../../core/constants/app_colors.dart';
+import '/core/models/escort_model.dart'; // ← NOUVEAU : pour écouter la session
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -19,8 +20,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   bool _searchOpen = false;
   final TextEditingController _searchCtrl = TextEditingController();
   final ValueNotifier<String> _searchQuery = ValueNotifier('');
-  bool _ageVerified = false; // Pour éviter d'afficher plusieurs fois
-  
+  bool _ageVerified = false;
+
+  // ← NOUVEAU : session globale pour l'avatar dans le header
+  final SessionManager _session = SessionManager();
+
   late final AnimationController _fadeCtrl;
   late final Animation<double> _fadeAnim;
 
@@ -28,7 +32,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   void initState() {
     super.initState();
     _fadeCtrl = AnimationController(
-      vsync: this, 
+      vsync: this,
       duration: const Duration(milliseconds: 250)
     );
     _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeInOut);
@@ -38,7 +42,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       _searchQuery.value = _searchCtrl.text.trim();
     });
 
-    // ← NOUVEAU : Affichage de la popup d'âge
+    // ← NOUVEAU : reconstruire le header à chaque changement de session
+    _session.addListener(_onSessionChange);
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _showAgeVerificationDialog();
     });
@@ -46,10 +52,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   @override
   void dispose() {
+    _session.removeListener(_onSessionChange);
     _fadeCtrl.dispose();
     _searchCtrl.dispose();
     _searchQuery.dispose();
     super.dispose();
+  }
+
+  void _onSessionChange() {
+    if (mounted) setState(() {});
   }
 
   void _showAgeVerificationDialog() {
@@ -84,17 +95,14 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           ],
         ),
         actions: [
-          // Bouton MOINS DE 18 ANS → Ferme la HomeScreen
           TextButton(
             onPressed: () {
-              Navigator.of(context).pop();           // Ferme la popup
-              Navigator.of(context).pop();           // Ferme la HomeScreen
+              Navigator.of(context).pop();
+              Navigator.of(context).pop();
             },
-            child: const Text("J'ai moins de 18 ans", 
+            child: const Text("J'ai moins de 18 ans",
                 style: TextStyle(color: Colors.grey, fontSize: 15)),
           ),
-
-          // Bouton PLUS DE 18 ANS → Reste sur l'application
           ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.primaryPink,
@@ -104,9 +112,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             ),
             onPressed: () {
               setState(() => _ageVerified = true);
-              Navigator.pop(context); // Ferme uniquement la popup
+              Navigator.pop(context);
             },
-            child: const Text("J'ai plus de 18 ans", 
+            child: const Text("J'ai plus de 18 ans",
                 style: TextStyle(fontWeight: FontWeight.bold)),
           ),
         ],
@@ -119,10 +127,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     _fadeCtrl.reverse().then((_) {
       setState(() {
         _currentIndex = index;
-        _searchOpen = false; // Ferme la recherche au changement d'onglet
+        _searchOpen = false;
       });
       _fadeCtrl.forward();
     });
+  }
+
+  /// ← NOUVEAU : basculer sur l'onglet Profil (index 2), utilisé par AbonnementsTab
+  void _goToProfilTab() {
+    _onTabTap(2);
   }
 
   @override
@@ -133,13 +146,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     return Scaffold(
       backgroundColor: AppColors.background,
       body: isDesktop ? _buildDesktopLayout() : _buildMobileLayout(),
-      bottomNavigationBar: !isDesktop 
-          ? CustomBottomNav(currentIndex: _currentIndex, onTap: _onTabTap) 
+      bottomNavigationBar: !isDesktop
+          ? CustomBottomNav(currentIndex: _currentIndex, onTap: _onTabTap)
           : null,
     );
   }
 
-  // --- STRUCTURE DESKTOP ---
   Widget _buildDesktopLayout() {
     return Row(
       children: [
@@ -157,7 +169,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
-  // --- STRUCTURE MOBILE ---
   Widget _buildMobileLayout() {
     return FadeTransition(
       opacity: _fadeAnim,
@@ -165,7 +176,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
-  // --- ZONE DE CONTENU ---
   Widget _buildScrollableContent(bool isDesktop) {
     return NestedScrollView(
       headerSliverBuilder: (_, __) => [
@@ -175,10 +185,13 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
-  // --- HEADER (MODIFIÉ : Cloche supprimée) ---
+  // ── HEADER — logo + recherche + avatar de profil ─────────────
   Widget _buildHeader(bool isDesktop) {
-    double logoHeight = isDesktop ? 100 : 70; 
+    double logoHeight  = isDesktop ? 100 : 70;
     double headerHeight = isDesktop ? 120 : 90;
+
+    // ← NOUVEAU : est-ce que l'utilisateur est connecté ?
+    final bool connecte = _session.estConnecte;
 
     return Container(
       height: headerHeight,
@@ -186,10 +199,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       color: AppColors.background,
       child: SafeArea(
         bottom: false,
-        top: !isDesktop, 
+        top: !isDesktop,
         child: Row(
           children: [
-            // Logo toujours visible
+            // Logo
             if (!_searchOpen || _currentIndex == 2)
               SizedBox(
                 height: logoHeight,
@@ -208,17 +221,77 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   ),
                 ),
               ),
-            // Barre de recherche (uniquement hors tab Profil)
+
+            // Barre de recherche (hors tab Profil)
             if (_searchOpen && _currentIndex != 2)
               Expanded(child: _buildSearchBar()),
+
             const Spacer(),
-            // Bouton recherche masqué sur le tab Profil
+
+            // ── Bouton recherche (hors tab Profil)
             if (_currentIndex != 2)
               _HeaderAction(
                 icon: Icons.search_rounded,
                 onTap: () => setState(() => _searchOpen = true),
               ),
+
+            // ── NOUVEAU : avatar / icône profil quand connecté (hors tab Profil)
+            if (connecte && _currentIndex != 2) ...[
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: () => _onTabTap(2), // ouvre le tab Profil
+                child: _buildAvatarChip(),
+              ),
+            ],
           ],
+        ),
+      ),
+    );
+  }
+
+  /// ← NOUVEAU : petit avatar circulaire avec photo ou initiale
+  Widget _buildAvatarChip() {
+    final escort = _session.escort;
+    final String initiale = (escort?.pseudo.isNotEmpty == true)
+        ? escort!.pseudo[0].toUpperCase()
+        : '?';
+
+    return Container(
+      width: 38,
+      height: 38,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: AppColors.primaryPink, width: 2),
+        color: AppColors.surfaceElevated,
+      ),
+      child: ClipOval(
+        child: (escort?.photoUrl != null && escort!.photoUrl!.isNotEmpty)
+            ? Image.network(
+                escort.photoUrl!,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => _initialeWidget(initiale),
+              )
+            : _initialeWidget(initiale),
+      ),
+    );
+  }
+
+  Widget _initialeWidget(String initiale) {
+    return Container(
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFFFF5DA8), Color(0xFFB68DFF)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: Text(
+        initiale,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 16,
+          fontWeight: FontWeight.bold,
         ),
       ),
     );
@@ -256,7 +329,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   Widget _buildTab(int index) {
     switch (index) {
       case 0: return PublicationsTab(searchQuery: _searchQuery);
-      case 1: return AbonnementsTab(searchQuery: _searchQuery);
+      // ← MODIFIÉ : on passe onGoToLogin au tab Abonnements
+      case 1: return AbonnementsTab(
+          searchQuery: _searchQuery,
+          onGoToLogin: _goToProfilTab,
+        );
       case 2: return const ProfilTab();
       default: return const SizedBox.shrink();
     }

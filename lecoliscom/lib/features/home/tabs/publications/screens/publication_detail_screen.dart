@@ -104,6 +104,18 @@ class _PublicationDetailScreenState extends State<PublicationDetailScreen> {
     _snack('Numéro copié !');
   }
 
+  // ← NOUVEAU : ouvrir le client mail
+  Future<void> _email() async {
+    final adresse = _pub.email;
+    if (adresse == null || adresse.isEmpty) return;
+    final uri = Uri.parse('mailto:$adresse');
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri);
+    } else {
+      _snack('Impossible d\'ouvrir le client mail');
+    }
+  }
+
   void _snack(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content:         Text(msg, style: const TextStyle(color: Colors.white)),
@@ -162,6 +174,8 @@ class _MobileLayout extends StatelessWidget {
       bottomNavigationBar: _ContactBar(
         onAppel:    s._appeler,
         onWhatsapp: s._whatsapp,
+        onEmail:    s._pub.email != null ? s._email : null,
+        hasEmail:   s._pub.email != null && s._pub.email!.isNotEmpty,
       ),
       body: CustomScrollView(
         slivers: [
@@ -253,6 +267,7 @@ class _MobileLayout extends StatelessWidget {
                     onAppel:    s._appeler,
                     onWhatsapp: s._whatsapp,
                     onCopier:   s._copier,
+                    onEmail:    s._email,
                   ),
                   const SizedBox(height: 16),
                 ],
@@ -388,6 +403,7 @@ class _TabletLayout extends StatelessWidget {
                       onAppel:    s._appeler,
                       onWhatsapp: s._whatsapp,
                       onCopier:   s._copier,
+                      onEmail:    s._email,
                       compact:    true,
                     ),
                   ),
@@ -528,6 +544,7 @@ class _DesktopLayout extends StatelessWidget {
                           onAppel:    s._appeler,
                           onWhatsapp: s._whatsapp,
                           onCopier:   s._copier,
+                          onEmail:    s._email,
                           compact:    true,
                         ),
                         const SizedBox(height: 32),
@@ -1017,13 +1034,14 @@ class _DescriptionText extends StatelessWidget {
 
 class _ContactCard extends StatelessWidget {
   final PublicationModel pub;
-  final VoidCallback     onAppel, onWhatsapp, onCopier;
+  final VoidCallback     onAppel, onWhatsapp, onCopier, onEmail;
   final bool             compact;
   const _ContactCard({
     required this.pub,
     required this.onAppel,
     required this.onWhatsapp,
     required this.onCopier,
+    required this.onEmail,
     this.compact = false,
   });
 
@@ -1085,22 +1103,67 @@ class _ContactCard extends StatelessWidget {
               ]),
             ),
           ),
+          // Email (si renseigné)
+          if (pub.email != null && pub.email!.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            GestureDetector(
+              onTap: onEmail,
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                decoration: BoxDecoration(
+                  color:        AppColors.surfaceElevated,
+                  borderRadius: BorderRadius.circular(12),
+                  border:       Border.all(color: AppColors.divider),
+                ),
+                child: Row(children: [
+                  const Icon(Icons.email_outlined, size: 15, color: AppColors.textMuted),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(pub.email!,
+                        style: const TextStyle(
+                            fontSize:     13,
+                            color:        AppColors.textPrimary,
+                            fontWeight:   FontWeight.w500,
+                            letterSpacing: 0.3)),
+                  ),
+                  const Icon(Icons.open_in_new_rounded, size: 13, color: AppColors.textMuted),
+                ]),
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
           if (compact)
-            Row(children: [
-              Expanded(child: _ContactButton(
-                  icon: Icons.phone_rounded,
-                  label: 'Appeler',
-                  color: const Color(0xFF5DB8FF),
-                  onTap: onAppel,
-                  compact: true)),
-              const SizedBox(width: 10),
-              Expanded(child: _ContactButton(
-                  icon: Icons.chat_rounded,
-                  label: 'WhatsApp',
-                  color: const Color(0xFF25D366),
-                  onTap: onWhatsapp,
-                  compact: true)),
+            Column(children: [
+              // Appeler + WhatsApp sur une ligne
+              Row(children: [
+                Expanded(child: _ContactButton(
+                    icon: Icons.phone_rounded,
+                    label: 'Appeler',
+                    color: const Color(0xFF5DB8FF),
+                    onTap: onAppel,
+                    compact: true)),
+                const SizedBox(width: 10),
+                Expanded(child: _ContactButton(
+                    icon: Icons.chat_rounded,
+                    label: 'WhatsApp',
+                    color: const Color(0xFF25D366),
+                    onTap: onWhatsapp,
+                    compact: true)),
+              ]),
+              // Email seul en dessous (pleine largeur, évite tout débordement)
+              if (pub.email != null && pub.email!.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: _ContactButton(
+                      icon:  Icons.email_rounded,
+                      label: 'Email',
+                      color: const Color(0xFFB68DFF),
+                      onTap: onEmail,
+                      compact: true),
+                ),
+              ],
             ])
           else ...[
             _ContactButton(
@@ -1114,6 +1177,14 @@ class _ContactCard extends StatelessWidget {
                 label: 'WhatsApp',
                 color: const Color(0xFF25D366),
                 onTap: onWhatsapp),
+            if (pub.email != null && pub.email!.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              _ContactButton(
+                  icon:  Icons.email_rounded,
+                  label: 'Envoyer un email',
+                  color: const Color(0xFFB68DFF),
+                  onTap: onEmail),
+            ],
           ],
         ],
       ),
@@ -1122,8 +1193,15 @@ class _ContactCard extends StatelessWidget {
 }
 
 class _ContactBar extends StatelessWidget {
-  final VoidCallback onAppel, onWhatsapp;
-  const _ContactBar({required this.onAppel, required this.onWhatsapp});
+  final VoidCallback  onAppel, onWhatsapp;
+  final VoidCallback? onEmail;   // ← NOUVEAU (optionnel, null si pas d'email)
+  final bool          hasEmail;  // ← NOUVEAU
+  const _ContactBar({
+    required this.onAppel,
+    required this.onWhatsapp,
+    this.onEmail,
+    this.hasEmail = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1142,7 +1220,7 @@ class _ContactBar extends StatelessWidget {
               color: const Color(0xFF5DB8FF),
               onTap: onAppel),
         ),
-        const SizedBox(width: 12),
+        const SizedBox(width: 10),
         Expanded(
           child: _ContactButton(
               icon:  Icons.chat_rounded,
@@ -1150,6 +1228,16 @@ class _ContactBar extends StatelessWidget {
               color: const Color(0xFF25D366),
               onTap: onWhatsapp),
         ),
+        if (hasEmail && onEmail != null) ...[
+          const SizedBox(width: 10),
+          Expanded(
+            child: _ContactButton(
+                icon:  Icons.email_rounded,
+                label: 'Email',
+                color: const Color(0xFFB68DFF),
+                onTap: onEmail!),
+          ),
+        ],
       ]),
     );
   }

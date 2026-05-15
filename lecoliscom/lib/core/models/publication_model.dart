@@ -31,26 +31,36 @@ extension PlanTypeExt on PlanType {
 }
 
 class PublicationModel {
-  final int id;
+  final int    id;
   final String escortPseudo;
   final String escortImageProfil;
   final List<String> imageUrls;
   final String titre;
   final String description;
   final String categorie;
+
   // ── Localisation hiérarchique ──
-  final String pays;      // ex: 'Cameroun'
-  final String region;    // ex: 'Centre'
-  final String ville;     // ex: 'Yaoundé'
-  final String quartier;  // ex: 'Bastos'
-  final String telephone;
-  final String whatsapp;
+  final String pays;
+  final String region;
+  final String ville;
+  final String quartier;
+
+  // ── Contacts ──
+  final String  telephone;
+  final String  whatsapp;
+  final String? email;        // ← NOUVEAU (optionnel)
+
   final PlanType planType;
-  final bool estVerifie;
+  final bool     estVerifie;
+
+  /// [estDisponible] indique si l'escort se déclare disponible pour des RDV.
+  /// Ce champ est INDÉPENDANT de la visibilité de la publication.
+  /// La visibilité est dictée uniquement par [dateExpiration] (abonnement actif).
   final bool estDisponible;
-  final double? tarif;
-  final DateTime dateExpiration;
-  final int vues;
+
+  final double?  tarif;
+  final DateTime dateExpiration; // Fin de l'abonnement lié à cette publication
+  final int      vues;
 
   const PublicationModel({
     required this.id,
@@ -66,6 +76,7 @@ class PublicationModel {
     required this.quartier,
     required this.telephone,
     required this.whatsapp,
+    this.email,                  // ← NOUVEAU
     required this.planType,
     required this.estVerifie,
     required this.estDisponible,
@@ -77,6 +88,8 @@ class PublicationModel {
   /// Image principale (vignette carte)
   String get imageUrl => imageUrls.isNotEmpty ? imageUrls.first : '';
 
+  /// Une publication est visible dans la liste uniquement si
+  /// l'abonnement associé est encore actif (dateExpiration non dépassée).
   bool get estActive => dateExpiration.isAfter(DateTime.now());
 
   /// Localisation affichable compacte
@@ -113,13 +126,12 @@ final List<PublicationModel> mockPublications = [
     description: 'Je propose des moments de qualité dans un cadre discret et chaleureux. Disponible en soirée. Appel uniquement.',
     categorie: 'Milf',
     pays: 'Cameroun', region: 'Centre',
-    ville: 'Yaoundé',
-    quartier: 'Bonanjo',
+    ville: 'Yaoundé', quartier: 'Bonanjo',
     telephone: '+237600000001',
-    whatsapp: '+237600000001',
+    whatsapp:  '+237600000001',
+    email:     'sofia.k@proton.me',
     planType: PlanType.premium,
-    estVerifie: true,
-    estDisponible: true,
+    estVerifie: true, estDisponible: true,
     tarif: 50000,
     dateExpiration: DateTime.now().add(const Duration(days: 20)),
     vues: 340,
@@ -136,13 +148,12 @@ final List<PublicationModel> mockPublications = [
     description: 'Belle et raffinée, je vous propose une expérience inoubliable.',
     categorie: 'Ebony',
     pays: 'Cameroun', region: 'Littoral',
-    ville: 'Douala',
-    quartier: 'Bonanjo',
+    ville: 'Douala', quartier: 'Bonanjo',
     telephone: '+237600000002',
-    whatsapp: '+237600000002',
+    whatsapp:  '+237600000002',
+    email:     'naomi.b@proton.me',
     planType: PlanType.premium,
-    estVerifie: true,
-    estDisponible: true,
+    estVerifie: true, estDisponible: true,
     tarif: 45000,
     dateExpiration: DateTime.now().add(const Duration(days: 15)),
     vues: 280,
@@ -161,13 +172,12 @@ final List<PublicationModel> mockPublications = [
     description: 'Jeune femme dynamique, douce et attentionnée.',
     categorie: 'Latina',
     pays: 'Cameroun', region: 'Centre',
-    ville: 'Yaoundé',
-    quartier: 'Nlongkak',
+    ville: 'Yaoundé', quartier: 'Nlongkak',
     telephone: '+237600000003',
-    whatsapp: '+237600000003',
+    whatsapp:  '+237600000003',
+    // pas d'email → null
     planType: PlanType.standard,
-    estVerifie: true,
-    estDisponible: true,
+    estVerifie: true, estDisponible: true,
     tarif: 30000,
     dateExpiration: DateTime.now().add(const Duration(days: 5)),
     vues: 120,
@@ -184,13 +194,12 @@ final List<PublicationModel> mockPublications = [
     description: 'Ronde et généreuse, pour ceux qui aiment les vraies courbes.',
     categorie: 'BBW',
     pays: 'Cameroun', region: 'Littoral',
-    ville: 'Douala',
-    quartier: 'Akwa',
+    ville: 'Douala', quartier: 'Akwa',
     telephone: '+237600000004',
-    whatsapp: '+237600000004',
+    whatsapp:  '+237600000004',
+    email:     'candy.m@proton.me',
     planType: PlanType.standard,
-    estVerifie: false,
-    estDisponible: true,
+    estVerifie: false, estDisponible: true,
     tarif: 25000,
     dateExpiration: DateTime.now().add(const Duration(days: 3)),
     vues: 95,
@@ -206,15 +215,14 @@ final List<PublicationModel> mockPublications = [
     description: 'Disponible en semaine, sérieuse et ponctuelle.',
     categorie: 'Asian',
     pays: 'Cameroun', region: 'Centre',
-    ville: 'Yaoundé',
-    quartier: 'Mvan',
+    ville: 'Yaoundé', quartier: 'Mvan',
     telephone: '+237600000005',
-    whatsapp: '+237600000005',
+    whatsapp:  '+237600000005',
+    // Abonnement expiré → cette publication n'apparaîtra PAS dans la liste
     planType: PlanType.basique,
-    estVerifie: false,
-    estDisponible: false,
+    estVerifie: false, estDisponible: false,
     tarif: 20000,
-    dateExpiration: DateTime.now().add(const Duration(days: 1)),
+    dateExpiration: DateTime.now().subtract(const Duration(days: 1)), // ← expiré
     vues: 45,
   ),
   PublicationModel(
@@ -230,13 +238,12 @@ final List<PublicationModel> mockPublications = [
     description: 'Experte en massage relaxant, corps et esprit.',
     categorie: 'Milf',
     pays: 'Cameroun', region: 'Ouest',
-    ville: 'Bafoussam',
-    quartier: 'Centre',
+    ville: 'Bafoussam', quartier: 'Centre',
     telephone: '+237600000006',
-    whatsapp: '+237600000006',
+    whatsapp:  '+237600000006',
+    email:     'nina.v@proton.me',
     planType: PlanType.premium,
-    estVerifie: true,
-    estDisponible: true,
+    estVerifie: true, estDisponible: true,
     tarif: 55000,
     dateExpiration: DateTime.now().add(const Duration(days: 25)),
     vues: 410,
@@ -253,13 +260,12 @@ final List<PublicationModel> mockPublications = [
     description: 'Pour sorties, dîners ou moments intimes. Bilingue.',
     categorie: 'Ebony',
     pays: 'Cameroun', region: 'Centre',
-    ville: 'Yaoundé',
-    quartier: 'Omnisports',
+    ville: 'Yaoundé', quartier: 'Omnisports',
     telephone: '+237600000007',
-    whatsapp: '+237600000007',
+    whatsapp:  '+237600000007',
+    // pas d'email
     planType: PlanType.standard,
-    estVerifie: true,
-    estDisponible: true,
+    estVerifie: true, estDisponible: true,
     tarif: 35000,
     dateExpiration: DateTime.now().add(const Duration(days: 8)),
     vues: 180,
@@ -277,13 +283,12 @@ final List<PublicationModel> mockPublications = [
     description: 'Jeune et pétillante, pour des moments légers.',
     categorie: 'BBW',
     pays: 'Cameroun', region: 'Littoral',
-    ville: 'Douala',
-    quartier: 'Deido',
+    ville: 'Douala', quartier: 'Deido',
     telephone: '+237600000008',
-    whatsapp: '+237600000008',
+    whatsapp:  '+237600000008',
+    email:     'tina.p@proton.me',
     planType: PlanType.basique,
-    estVerifie: false,
-    estDisponible: true,
+    estVerifie: false, estDisponible: true,
     tarif: 15000,
     dateExpiration: DateTime.now().add(const Duration(days: 2)),
     vues: 60,
@@ -291,13 +296,8 @@ final List<PublicationModel> mockPublications = [
 ];
 
 // ─────────────────────────────────────────────────────────
-// LISTES FILTRE — importées depuis les fichiers de données
+// LISTES FILTRE
 // ─────────────────────────────────────────────────────────
-// Utiliser toutesLesCategories depuis categories_data.dart
-// Utiliser locationData depuis location_data.dart
-// Ces listes sont conservées ici uniquement pour compatibilité
-// avec les anciens imports — à supprimer quand le refactor est complet.
-
 const List<String> categories = [
   'Toutes', 'Milf', 'BBW', 'Ebony', 'Latina', 'Asian', 'Trans', 'Couple',
 ];
@@ -310,11 +310,11 @@ const List<String> villes = [
 // AVIS ANONYME
 // ─────────────────────────────────────────────────────────
 class AvisModel {
-  final int          id;
-  final int          publicationId;
-  final int          note;        // 1-5
-  final String       message;
-  final DateTime     createdAt;
+  final int      id;
+  final int      publicationId;
+  final int      note;
+  final String   message;
+  final DateTime createdAt;
 
   const AvisModel({
     required this.id,
@@ -336,10 +336,10 @@ enum SignalementMotif {
 
   String get label {
     switch (this) {
-      case SignalementMotif.fauxCompte:          return 'Faux compte';
-      case SignalementMotif.spam:                return 'Spam';
-      case SignalementMotif.contenuInapproprie:  return 'Contenu inapproprié';
-      case SignalementMotif.autre:               return 'Autre';
+      case SignalementMotif.fauxCompte:         return 'Faux compte';
+      case SignalementMotif.spam:               return 'Spam';
+      case SignalementMotif.contenuInapproprie: return 'Contenu inapproprié';
+      case SignalementMotif.autre:              return 'Autre';
     }
   }
 }

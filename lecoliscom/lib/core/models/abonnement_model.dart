@@ -27,19 +27,24 @@ class PlanAbonnement {
 
 /// Définit un abonnement acheté par un utilisateur
 class AbonnementSouscrit {
-  final String id;
+  final String       id;
   final PlanAbonnement plan;
-  final DateTime dateDebut;
-  final DateTime dateFin;
-  final String statut; // 'actif', 'expire'
+  final DateTime     dateDebut;
+  DateTime           dateFin;       // mutable : l'admin peut ajuster l'expiration
+  final String       statut;        // 'actif', 'expire'
 
-  const AbonnementSouscrit({
+  /// Nombre de publications ajusté par l'admin (commence à plan.nbPublications).
+  /// Mutable pour permettre les ajustements individuels.
+  int nbPublicationsAdm;
+
+  AbonnementSouscrit({
     required this.id,
     required this.plan,
     required this.dateDebut,
     required this.dateFin,
     required this.statut,
-  });
+    int? nbPublicationsAdm,
+  }) : nbPublicationsAdm = nbPublicationsAdm ?? plan.nbPublications;
 
   bool get estActif => statut == 'actif' && dateFin.isAfter(DateTime.now());
 }

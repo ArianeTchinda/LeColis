@@ -1,17 +1,20 @@
 // lib/features/home/tabs/profil/models/escort_model.dart
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../../../core/services/auth_service.dart';
+import '../../../../core/models/auth_response.dart';
 
 // ─────────────────────────────────────────────────────────
 // MODÈLE ESCORT (utilisateur connecté)
 // ─────────────────────────────────────────────────────────
 class EscortModel {
-  final String  id;
-  final String  pseudo;
-  final String  email;
-  final String  telephone;
-  final String? photoUrl;
-  final bool    estVerifie;
+  final String   id;
+  final String   pseudo;
+  final String   email;
+  final String   telephone;
+  final String?  photoUrl;
+  final bool     estVerifie;
   final DateTime dateInscription;
 
   const EscortModel({
@@ -23,6 +26,17 @@ class EscortModel {
     required this.estVerifie,
     required this.dateInscription,
   });
+
+  factory EscortModel.fromJson(Map<String, dynamic> json) => EscortModel(
+    id:              json['id'],
+    pseudo:          json['pseudo'],
+    email:           json['email'],
+    telephone:       json['telephone'] ?? '',
+    photoUrl:        json['photoUrl'],
+    estVerifie:      json['estVerifie'] ?? false,
+    dateInscription: DateTime.parse(
+        json['createdAt'] ?? DateTime.now().toIso8601String()),
+  );
 }
 
 // ─────────────────────────────────────────────────────────
@@ -72,60 +86,102 @@ class PublicationGestion {
 }
 
 // ─────────────────────────────────────────────────────────
-// SESSION MOCK — remplacer par vrai auth (Riverpod/Provider)
+// SESSION MANAGER — auth réelle via API
 // ─────────────────────────────────────────────────────────
 class SessionManager extends ChangeNotifier {
   static final SessionManager _instance = SessionManager._internal();
   factory SessionManager() => _instance;
   SessionManager._internal();
 
-  EscortModel? _escort;
-  bool get estConnecte => _escort != null;
-  EscortModel? get escort => _escort;
+  final AuthService _authService = AuthService();
 
-  // Simule une connexion réussie
+  EscortModel? _escort;
+  String?      _accessToken;
+  String?      _refreshToken;
+  String?      _derniereErreur;
+
+  bool         get estConnecte    => _escort != null;
+  EscortModel? get escort         => _escort;
+  String?      get accessToken    => _accessToken;
+  String?      get derniereErreur => _derniereErreur;
+
+  // ── Login ────────────────────────────────────────────────
   Future<bool> connecter(String email, String motDePasse) async {
-    await Future.delayed(const Duration(seconds: 1));
-    // Mock : tout email/mdp valide fonctionne
-    if (email.contains('@') && motDePasse.length >= 6) {
-      _escort = EscortModel(
-        id:               'escort_001',
-        pseudo:           email.split('@').first,
-        email:            email,
-        telephone:        '+237691000001',
-        photoUrl:         'https://randomuser.me/api/portraits/women/44.jpg',
-        estVerifie:       true,
-        dateInscription:  DateTime.now().subtract(const Duration(days: 45)),
+    _derniereErreur = null;
+    try {
+      final res = await _authService.login(
+        email:      email,
+        motDePasse: motDePasse,
       );
-      notifyListeners();
+      await _sauvegarderSession(res);
       return true;
+    } on AuthException catch (e) {
+      _derniereErreur = e.message;
+      return false;
+    } catch (_) {
+      _derniereErreur = 'Erreur réseau. Vérifiez votre connexion.';
+      return false;
     }
-    return false;
   }
 
-  // Simule une inscription réussie
+  // ── Register ─────────────────────────────────────────────
   Future<bool> inscrire({
     required String pseudo,
     required String email,
     required String telephone,
     required String motDePasse,
   }) async {
-    await Future.delayed(const Duration(seconds: 1));
-    _escort = EscortModel(
-      id:              'escort_new_${DateTime.now().millisecondsSinceEpoch}',
-      pseudo:          pseudo,
-      email:           email,
-      telephone:       telephone,
-      photoUrl:        null,
-      estVerifie:      false,
-      dateInscription: DateTime.now(),
-    );
-    notifyListeners();
-    return true;
+    _derniereErreur = null;
+    try {
+      final res = await _authService.register(
+        pseudo:     pseudo,
+        email:      email,
+        telephone:  telephone,
+        motDePasse: motDePasse,
+      );
+      await _sauvegarderSession(res);
+      return true;
+    } on AuthException catch (e) {
+      _derniereErreur = e.message;
+      return false;
+    } catch (_) {
+      _derniereErreur = 'Erreur réseau. Vérifiez votre connexion.';
+      return false;
+    }
   }
 
-  void deconnecter() {
-    _escort = null;
+  // ── Déconnexion ──────────────────────────────────────────
+  Future<void> deconnecter() async {
+    if (_refreshToken != null) {
+      await _authService.logout(_refreshToken!);
+    }
+    _escort       = null;
+    _accessToken  = null;
+    _refreshToken = null;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('accessToken');
+    await prefs.remove('refreshToken');
+    notifyListeners();
+  }
+
+  // ── Restaurer session au démarrage de l'app ──────────────
+  Future<void> restaurer() async {
+    final prefs   = await SharedPreferences.getInstance();
+    _accessToken  = prefs.getString('accessToken');
+    _refreshToken = prefs.getString('refreshToken');
+    // Si token présent → recharger le profil via GET /profil
+    // (à implémenter lors de l'intégration du ProfilService)
+    notifyListeners();
+  }
+
+  // ── Privé ────────────────────────────────────────────────
+  Future<void> _sauvegarderSession(AuthResponse res) async {
+    _escort       = res.escort;
+    _accessToken  = res.accessToken;
+    _refreshToken = res.refreshToken;
+    final prefs   = await SharedPreferences.getInstance();
+    await prefs.setString('accessToken',  res.accessToken);
+    await prefs.setString('refreshToken', res.refreshToken);
     notifyListeners();
   }
 }
@@ -138,28 +194,28 @@ enum TypeNotification { systeme, admin, abonnement, publication }
 extension TypeNotificationExt on TypeNotification {
   IconData get icone {
     switch (this) {
-      case TypeNotification.systeme:      return Icons.info_outline_rounded;
-      case TypeNotification.admin:        return Icons.admin_panel_settings_outlined;
-      case TypeNotification.abonnement:   return Icons.workspace_premium_outlined;
-      case TypeNotification.publication:  return Icons.article_outlined;
+      case TypeNotification.systeme:     return Icons.info_outline_rounded;
+      case TypeNotification.admin:       return Icons.admin_panel_settings_outlined;
+      case TypeNotification.abonnement:  return Icons.workspace_premium_outlined;
+      case TypeNotification.publication: return Icons.article_outlined;
     }
   }
 
   Color get couleur {
     switch (this) {
-      case TypeNotification.systeme:      return Color(0xFF5DB8FF);
-      case TypeNotification.admin:        return Color(0xFFB68DFF);
-      case TypeNotification.abonnement:   return Color(0xFFFFD700);
-      case TypeNotification.publication:  return Color(0xFFFF5DA8);
+      case TypeNotification.systeme:     return const Color(0xFF5DB8FF);
+      case TypeNotification.admin:       return const Color(0xFFB68DFF);
+      case TypeNotification.abonnement:  return const Color(0xFFFFD700);
+      case TypeNotification.publication: return const Color(0xFFFF5DA8);
     }
   }
 
   String get label {
     switch (this) {
-      case TypeNotification.systeme:      return 'Système';
-      case TypeNotification.admin:        return 'Admin';
-      case TypeNotification.abonnement:   return 'Abonnement';
-      case TypeNotification.publication:  return 'Publication';
+      case TypeNotification.systeme:     return 'Système';
+      case TypeNotification.admin:       return 'Admin';
+      case TypeNotification.abonnement:  return 'Abonnement';
+      case TypeNotification.publication: return 'Publication';
     }
   }
 }

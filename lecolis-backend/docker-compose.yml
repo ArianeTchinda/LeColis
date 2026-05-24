@@ -1,0 +1,98 @@
+# ═══════════════════════════════════════════════════════════
+# LeColis — Docker Compose
+# PostgreSQL + pgAdmin + MinIO
+# ═══════════════════════════════════════════════════════════
+
+services:
+  # ── PostgreSQL ──────────────────────────────────────────
+  # Base de données principale pour Prisma ORM
+  # Port exposé : 5432 (localhost)
+  # ─────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: lecolis_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: lecolis_db          # Nom de la base de données
+      POSTGRES_USER: lecolis_user      # Utilisateur principal
+      POSTGRES_PASSWORD: lecolis_pass  # Mot de passe (à changer en prod)
+    ports:
+      - "5432:5432"                    # Expose PostgreSQL sur le port local 5432
+    volumes:
+      - postgres_data:/var/lib/postgresql/data  # Persistance des données
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lecolis_user -d lecolis_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── pgAdmin ─────────────────────────────────────────────
+  # Interface web de gestion PostgreSQL
+  # Accès : http://localhost:5050
+  # Login : admin@lecolis.com / Admin@2025!
+  # ─────────────────────────────────────────────────────────
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: lecolis_pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@lecolis.com     # Email de connexion
+      PGADMIN_DEFAULT_PASSWORD: Admin@2025!          # Mot de passe de connexion
+      PGADMIN_CONFIG_SERVER_MODE: "False"           # Mode desktop (pas de multi-user)
+    ports:
+      - "5050:80"                                   # Expose pgAdmin sur le port local 5050
+    depends_on:
+      - postgres                                     # Attend que PostgreSQL soit prêt
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin                # Persistance des configs pgAdmin
+
+  # ── MinIO ───────────────────────────────────────────────
+  # Stockage S3-compatible pour les images
+  # API : http://localhost:9000
+  # Console : http://localhost:9001
+  # ─────────────────────────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: lecolis_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: lecolis_minio_access     # Clé d'accès
+      MINIO_ROOT_PASSWORD: lecolis_minio_secret  # Clé secrète
+    ports:
+      - "9000:9000"   # API S3 (pour uploads/download)
+      - "9001:9001"   # Console Web (admin MinIO)
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # ── MinIO init (crée les buckets au démarrage) ──────────
+  # Script exécuté une seule fois après le démarrage de MinIO
+  # Crée les buckets et les rend publics en lecture
+  # ─────────────────────────────────────────────────────────
+  minio-init:
+    image: minio/mc:latest
+    container_name: lecolis_minio_init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 lecolis_minio_access lecolis_minio_secret;
+      mc mb --ignore-existing local/escorts-photos;
+      mc mb --ignore-existing local/publications-images;
+      mc anonymous set download local/escorts-photos;
+      mc anonymous set download local/publications-images;
+      echo 'Buckets créés et configurés en lecture publique';
+      "
+    restart: "no"  # Ne redémarre pas (one-shot)
+
+# ── Volumes ───────────────────────────────────────────────
+volumes:
+  postgres_data:    # Données PostgreSQL (persistantes)
+  pgadmin_data:     # Configurations pgAdmin (persistantes)
+  minio_data:       # Fichiers MinIO (persistants)

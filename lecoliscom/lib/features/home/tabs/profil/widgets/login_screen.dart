@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import '../../../../../core/constants/app_colors.dart';
 import '/core/models/escort_model.dart';
+import 'mot_de_passe_oublie_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   final SessionManager session;
@@ -17,8 +18,8 @@ class _LoginScreenState extends State<LoginScreen> {
   final _emailCtrl = TextEditingController();
   final _mdpCtrl   = TextEditingController();
 
-  bool _loading     = false;
-  bool _mdpVisible  = false;
+  bool    _loading    = false;
+  bool    _mdpVisible = false;
   String? _erreur;
 
   @override
@@ -40,11 +41,20 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!mounted) return;
     if (!ok) {
       setState(() {
-        _erreur  = 'Email ou mot de passe incorrect.';
+        _erreur  = widget.session.derniereErreur ?? 'Erreur inconnue.';
         _loading = false;
       });
     }
-    // Si ok → SessionManager notifie → ProfilTab rebuild auto
+  }
+
+  void _ouvrirMotDePasseOublie() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const MotDePasseOublieScreen(),
+        fullscreenDialog: true,
+      ),
+    );
   }
 
   @override
@@ -54,15 +64,14 @@ class _LoginScreenState extends State<LoginScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Email
           AuthChampLabel(text: 'Adresse email'),
           const SizedBox(height: 6),
           AuthChamp(
-            controller:  _emailCtrl,
-            hint:        'votre@email.com',
-            icone:       Icons.email_outlined,
-            clavier:     TextInputType.emailAddress,
-            validateur:  (v) {
+            controller: _emailCtrl,
+            hint:       'votre@email.com',
+            icone:      Icons.email_outlined,
+            clavier:    TextInputType.emailAddress,
+            validateur: (v) {
               if (v == null || v.trim().isEmpty) return 'Email requis';
               if (!v.contains('@')) return 'Email invalide';
               return null;
@@ -71,22 +80,20 @@ class _LoginScreenState extends State<LoginScreen> {
 
           const SizedBox(height: 16),
 
-          // Mot de passe
           AuthChampLabel(text: 'Mot de passe'),
           const SizedBox(height: 6),
           AuthChamp(
-            controller:   _mdpCtrl,
-            hint:         '••••••••',
-            icone:        Icons.lock_outline_rounded,
-            obscure:      !_mdpVisible,
+            controller: _mdpCtrl,
+            hint:       '••••••••',
+            icone:      Icons.lock_outline_rounded,
+            obscure:    !_mdpVisible,
             suffixIcon: GestureDetector(
               onTap: () => setState(() => _mdpVisible = !_mdpVisible),
               child: Icon(
                 _mdpVisible
                     ? Icons.visibility_off_outlined
                     : Icons.visibility_outlined,
-                size:  18,
-                color: AppColors.textMuted,
+                size: 18, color: AppColors.textMuted,
               ),
             ),
             validateur: (v) {
@@ -98,12 +105,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
           const SizedBox(height: 10),
 
-          // Erreur
           if (_erreur != null) AuthErreur(message: _erreur!),
 
           const SizedBox(height: 24),
 
-          // Bouton
           AuthBouton(
             label:   'Se connecter',
             loading: _loading,
@@ -112,16 +117,16 @@ class _LoginScreenState extends State<LoginScreen> {
 
           const SizedBox(height: 14),
 
-          // Mot de passe oublié
+          // ── Mot de passe oublié (fonctionnel) ──────────────
           Center(
             child: GestureDetector(
-              onTap: () {/* TODO: reset mdp */},
+              onTap: _ouvrirMotDePasseOublie,
               child: const Text(
                 'Mot de passe oublié ?',
                 style: TextStyle(
-                  fontSize:  13,
-                  color:     AppColors.primaryPinkSoft,
-                  decoration: TextDecoration.underline,
+                  fontSize:        13,
+                  color:           AppColors.primaryPinkSoft,
+                  decoration:      TextDecoration.underline,
                   decorationColor: AppColors.primaryPinkSoft,
                 ),
               ),
@@ -134,20 +139,19 @@ class _LoginScreenState extends State<LoginScreen> {
 }
 
 // ─────────────────────────────────────────────────────────
-// WIDGETS PARTAGÉS (utilisés aussi par RegisterScreen)
+// WIDGETS PARTAGÉS
 // ─────────────────────────────────────────────────────────
 
 class AuthChampLabel extends StatelessWidget {
   final String text;
-  const AuthChampLabel({required this.text});
+  const AuthChampLabel({required this.text, super.key});
 
   @override
   Widget build(BuildContext context) => Text(
     text,
     style: const TextStyle(
-      fontSize:   13,
-      fontWeight: FontWeight.w500,
-      color:      AppColors.textSecondary,
+      fontSize: 13, fontWeight: FontWeight.w500,
+      color: AppColors.textSecondary,
     ),
   );
 }
@@ -169,24 +173,25 @@ class AuthChamp extends StatelessWidget {
     this.obscure    = false,
     this.suffixIcon,
     this.validateur,
+    super.key,
   });
 
   @override
   Widget build(BuildContext context) {
     return TextFormField(
-      controller:       controller,
-      keyboardType:     clavier,
-      obscureText:      obscure,
-      validator:        validateur,
+      controller:   controller,
+      keyboardType: clavier,
+      obscureText:  obscure,
+      validator:    validateur,
       style: const TextStyle(color: AppColors.textPrimary, fontSize: 14),
       decoration: InputDecoration(
-        hintText:    hint,
-        hintStyle:   const TextStyle(color: AppColors.textMuted, fontSize: 13),
-        prefixIcon:  Icon(icone, size: 18, color: AppColors.textMuted),
-        suffixIcon:  suffixIcon,
-        filled:      true,
-        fillColor:   AppColors.surface,
-        errorStyle:  const TextStyle(color: Color(0xFFFF5252), fontSize: 11),
+        hintText:   hint,
+        hintStyle:  const TextStyle(color: AppColors.textMuted, fontSize: 13),
+        prefixIcon: Icon(icone, size: 18, color: AppColors.textMuted),
+        suffixIcon: suffixIcon,
+        filled:     true,
+        fillColor:  AppColors.surface,
+        errorStyle: const TextStyle(color: Color(0xFFFF5252), fontSize: 11),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
           borderSide:   const BorderSide(color: AppColors.divider),
@@ -204,8 +209,8 @@ class AuthChamp extends StatelessWidget {
           borderRadius: BorderRadius.circular(14),
           borderSide:   const BorderSide(color: Color(0xFFFF5252)),
         ),
-        contentPadding: const EdgeInsets.symmetric(
-            horizontal: 14, vertical: 13),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
       ),
     );
   }
@@ -213,7 +218,7 @@ class AuthChamp extends StatelessWidget {
 
 class AuthErreur extends StatelessWidget {
   final String message;
-  const AuthErreur({required this.message});
+  const AuthErreur({required this.message, super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -245,6 +250,7 @@ class AuthBouton extends StatelessWidget {
     required this.label,
     required this.loading,
     required this.onTap,
+    super.key,
   });
 
   @override
@@ -252,9 +258,9 @@ class AuthBouton extends StatelessWidget {
     return GestureDetector(
       onTap: loading ? null : onTap,
       child: AnimatedContainer(
-        duration:    const Duration(milliseconds: 200),
-        width:       double.infinity,
-        padding:     const EdgeInsets.symmetric(vertical: 15),
+        duration:  const Duration(milliseconds: 200),
+        width:     double.infinity,
+        padding:   const EdgeInsets.symmetric(vertical: 15),
         decoration: BoxDecoration(
           gradient: loading
               ? null
@@ -265,16 +271,15 @@ class AuthBouton extends StatelessWidget {
           boxShadow: loading ? null : [
             BoxShadow(
               color:      AppColors.primaryPink.withOpacity(0.28),
-              blurRadius: 18,
-              offset:     const Offset(0, 5),
+              blurRadius: 18, offset: const Offset(0, 5),
             ),
           ],
         ),
         child: loading
             ? const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                 SizedBox(width: 16, height: 16,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: AppColors.primaryPink)),
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: AppColors.primaryPink)),
                 SizedBox(width: 10),
                 Text('Connexion…',
                     style: TextStyle(

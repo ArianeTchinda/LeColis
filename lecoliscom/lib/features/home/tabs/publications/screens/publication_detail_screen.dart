@@ -131,7 +131,7 @@ class _PublicationDetailScreenState extends State<PublicationDetailScreen> {
     if (message.trim().isEmpty) return;
     setState(() {
       _avis.insert(0, AvisModel(
-        id:            _avis.length + 100,
+        id:            (_avis.length + 100).toString(),
         publicationId: _pub.id,
         note:          note,
         message:       message.trim(),

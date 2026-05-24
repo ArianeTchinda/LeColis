@@ -1,14 +1,26 @@
 // lib/main.dart
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'core/theme/app_theme.dart';
 import 'features/splash/splash_screen.dart';
 import 'features/admin/admin_login_screen.dart';
 import 'features/admin/admin_dashboard_screen.dart';
 import 'core/models/admin_models.dart';
+import 'core/models/escort_model.dart'; // SessionManager vient d'ici selon votre snippet
 
-void main() {
-  runApp(const MyApp());
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  final session = SessionManager();
+  await session.restaurer(); // recharge le profil si token présent
+
+  runApp(
+    ChangeNotifierProvider<SessionManager>.value(
+      value: session,
+      child: const MyApp(),
+    ),
+  );
 }
 
 class MyApp extends StatelessWidget {

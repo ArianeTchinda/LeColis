@@ -1,0 +1,422 @@
+// prisma/schema.prisma
+// LeColis — Base de données complète
+// PostgreSQL + Prisma ORM
+
+generator client {
+  provider = "prisma-client-js"
+  binaryTargets = ["native", "windows"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────
+// LOCALISATION (Pays → Région → Ville → Quartier)
+// ─────────────────────────────────────────────────────────
+
+model Pays {
+  id       String   @id @default(cuid())
+  nom      String   @unique
+  drapeau  String   // emoji drapeau
+  regions  Region[]
+
+  @@map("pays")
+}
+
+model Region {
+  id      String  @id @default(cuid())
+  nom     String
+  paysId  String
+  pays    Pays    @relation(fields: [paysId], references: [id], onDelete: Cascade)
+  villes  Ville[]
+
+  @@unique([nom, paysId])
+  @@map("regions")
+}
+
+model Ville {
+  id        String     @id @default(cuid())
+  nom       String
+  regionId  String
+  region    Region     @relation(fields: [regionId], references: [id], onDelete: Cascade)
+  quartiers Quartier[]
+
+  @@unique([nom, regionId])
+  @@map("villes")
+}
+
+model Quartier {
+  id           String        @id @default(cuid())
+  nom          String
+  villeId      String
+  ville        Ville         @relation(fields: [villeId], references: [id], onDelete: Cascade)
+  publications Publication[]
+
+  @@unique([nom, villeId])
+  @@map("quartiers")
+}
+
+// ─────────────────────────────────────────────────────────
+// CATÉGORIES (groupes + catégories)
+// ─────────────────────────────────────────────────────────
+
+model GroupeCategorie {
+  id         String      @id @default(cuid())
+  nom        String      @unique
+  ordre      Int         @default(0)
+  categories Categorie[]
+
+  @@map("groupes_categories")
+}
+
+model Categorie {
+  id               String            @id @default(cuid())
+  nom              String            @unique
+  groupeId         String
+  groupe           GroupeCategorie   @relation(fields: [groupeId], references: [id], onDelete: Cascade)
+  publications     PublicationCategorie[]
+
+  @@map("categories")
+}
+
+// ─────────────────────────────────────────────────────────
+// ESCORT (utilisateur)
+// ─────────────────────────────────────────────────────────
+
+model Escort {
+  id               String    @id @default(cuid())
+  pseudo           String    @unique
+  email            String    @unique
+  telephone        String    @unique
+  motDePasseHash   String
+  photoUrl         String?   // URL MinIO
+  photoKey         String?   // clé MinIO (pour suppression)
+  estVerifie       Boolean   @default(false)
+  estBloque        Boolean   @default(false)
+  estBanni         Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  // Relations
+  abonnements      Abonnement[]
+  transactions     Transaction[]
+  publications     Publication[]
+  notifications    Notification[]
+  sanctionsRecues  Sanction[]
+  signalements     Signalement[]   @relation("EscortSignale")
+  refreshTokens    RefreshToken[]
+
+  @@map("escorts")
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  escortId  String
+  escort    Escort   @relation(fields: [escortId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@map("refresh_tokens")
+}
+
+// ─────────────────────────────────────────────────────────
+// PLANS D'ABONNEMENT (configurables par l'admin)
+// ─────────────────────────────────────────────────────────
+
+model PlanAbonnement {
+  id               String       @id @default(cuid())
+  nom              String       @unique
+  description      String
+  prix             Float        @default(0)
+  nbPublications   Int          @default(1)
+  dureeJours       Int          @default(7)
+  accentColor      String       @default("#8A8A9A") // hex
+  icone            String       @default("star_outline") // nom icône Material
+  avantages        String[]     // liste de strings
+  estBasique       Boolean      @default(false)   // plan gratuit offert à l'inscription
+  estBase          Boolean      @default(true)    // non supprimable par l'admin
+  ordre            Int          @default(0)       // ordre d'affichage
+  actif            Boolean      @default(true)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  abonnements      Abonnement[]
+
+  @@map("plans_abonnement")
+}
+
+// ─────────────────────────────────────────────────────────
+// ABONNEMENT SOUSCRIT
+// ─────────────────────────────────────────────────────────
+
+enum StatutAbonnement {
+  ACTIF
+  EXPIRE
+  ANNULE
+}
+
+model Abonnement {
+  id                  String            @id @default(cuid())
+  escortId            String
+  escort              Escort            @relation(fields: [escortId], references: [id], onDelete: Cascade)
+  planId              String
+  plan                PlanAbonnement    @relation(fields: [planId], references: [id])
+  dateDebut           DateTime          @default(now())
+  dateFin             DateTime
+  statut              StatutAbonnement  @default(ACTIF)
+  nbPublicationsAdm   Int?              // ajusté par l'admin (null = valeur du plan)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  transaction         Transaction?
+
+  @@map("abonnements")
+}
+
+// ─────────────────────────────────────────────────────────
+// TRANSACTIONS (paiements)
+// ─────────────────────────────────────────────────────────
+
+enum StatutTransaction {
+  SUCCES
+  EN_ATTENTE
+  ECHEC
+}
+
+model Transaction {
+  id               String             @id @default(cuid())
+  escortId         String
+  escort           Escort             @relation(fields: [escortId], references: [id], onDelete: Cascade)
+  abonnementId     String?            @unique
+  abonnement       Abonnement?        @relation(fields: [abonnementId], references: [id])
+  planNom          String             // snapshot du nom du plan au moment du paiement
+  montant          Float
+  methodePaiement  String             // "MTN MoMo", "Orange Money", etc.
+  statut           StatutTransaction  @default(EN_ATTENTE)
+  referenceExterne String?            // référence retournée par l'opérateur
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  @@map("transactions")
+}
+
+// ─────────────────────────────────────────────────────────
+// PUBLICATIONS
+// ─────────────────────────────────────────────────────────
+
+enum StatutPublication {
+  ACTIVE
+  EXPIREE
+  BROUILLON
+  SUSPENDUE
+}
+
+model Publication {
+  id               String            @id @default(cuid())
+  escortId         String
+  escort           Escort            @relation(fields: [escortId], references: [id], onDelete: Cascade)
+
+  titre            String
+  description      String
+  estDisponible    Boolean           @default(true)
+  tarif            Float?
+  statut           StatutPublication  @default(BROUILLON)
+  vues             Int               @default(0)
+  dateExpiration   DateTime
+
+  // Localisation (référence aux IDs en base)
+  quartierId       String?
+  quartier         Quartier?         @relation(fields: [quartierId], references: [id])
+  villeNom         String            // snapshot pour affichage rapide
+  regionNom        String
+  paysNom          String            @default("Cameroun")
+
+  // Plan (snapshot au moment de la publication)
+  planType         String            // "premium", "standard", "basique"
+
+  // Images MinIO
+  images           PublicationImage[]
+
+  // Catégories (many-to-many)
+  categories       PublicationCategorie[]
+
+  // Avis & signalements
+  avis             Avis[]
+  signalements     Signalement[]
+
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@map("publications")
+}
+
+model PublicationImage {
+  id            String      @id @default(cuid())
+  publicationId String
+  publication   Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  url           String      // URL publique MinIO
+  key           String      // clé MinIO (pour suppression)
+  ordre         Int         @default(0)  // ordre d'affichage
+  createdAt     DateTime    @default(now())
+
+  @@map("publication_images")
+}
+
+model PublicationCategorie {
+  publicationId String
+  publication   Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  categorieId   String
+  categorie     Categorie   @relation(fields: [categorieId], references: [id], onDelete: Cascade)
+
+  @@id([publicationId, categorieId])
+  @@map("publication_categories")
+}
+
+// ─────────────────────────────────────────────────────────
+// AVIS (anonymes, liés à une publication)
+// ─────────────────────────────────────────────────────────
+
+model Avis {
+  id            String      @id @default(cuid())
+  publicationId String
+  publication   Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  note          Int         // 1 à 5
+  message       String
+  createdAt     DateTime    @default(now())
+
+  @@map("avis")
+}
+
+// ─────────────────────────────────────────────────────────
+// SIGNALEMENTS
+// ─────────────────────────────────────────────────────────
+
+enum StatutSignalement {
+  EN_ATTENTE
+  TRAITE
+  IGNORE
+}
+
+model Signalement {
+  id              String             @id @default(cuid())
+  escortId        String             // l'escort signalée
+  escortSignalee  Escort             @relation("EscortSignale", fields: [escortId], references: [id], onDelete: Cascade)
+  publicationId   String?            // optionnel : signalement lié à une publication précise
+  publication     Publication?       @relation(fields: [publicationId], references: [id])
+  motif           String             // "Faux compte", "Spam", etc.
+  description     String?
+  statut          StatutSignalement  @default(EN_ATTENTE)
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@map("signalements")
+}
+
+// ─────────────────────────────────────────────────────────
+// NOTIFICATIONS (pour les escorts)
+// ─────────────────────────────────────────────────────────
+
+enum TypeNotification {
+  SYSTEME
+  ADMIN
+  ABONNEMENT
+  PUBLICATION
+}
+
+model Notification {
+  id        String            @id @default(cuid())
+  escortId  String
+  escort    Escort            @relation(fields: [escortId], references: [id], onDelete: Cascade)
+  type      TypeNotification
+  titre     String
+  message   String
+  lue       Boolean           @default(false)
+  createdAt DateTime          @default(now())
+
+  @@map("notifications")
+}
+
+// ─────────────────────────────────────────────────────────
+// SANCTIONS (admin → escort)
+// ─────────────────────────────────────────────────────────
+
+enum TypeSanction {
+  AVERTISSEMENT
+  BLOCAGE_TEMPORAIRE
+  BANNISSEMENT
+}
+
+model Sanction {
+  id        String       @id @default(cuid())
+  escortId  String
+  escort    Escort       @relation(fields: [escortId], references: [id], onDelete: Cascade)
+  type      TypeSanction
+  motif     String
+  dateDebut DateTime     @default(now())
+  dateFin   DateTime?    // null = permanent (bannissement)
+  active    Boolean      @default(true)
+  adminId   String       // ID de l'admin (pas de FK car table séparée)
+  createdAt DateTime     @default(now())
+
+  @@map("sanctions")
+}
+
+// ─────────────────────────────────────────────────────────
+// ADMIN (table séparée des escorts)
+// ─────────────────────────────────────────────────────────
+
+model Admin {
+  id             String   @id @default(cuid())
+  email          String   @unique
+  motDePasseHash String
+  nom            String   @default("Administrateur")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  notificationsEnvoyees NotificationAdmin[]
+
+  @@map("admins")
+}
+
+// ─────────────────────────────────────────────────────────
+// NOTIFICATIONS ADMIN (envoyées en masse ou individuel)
+// ─────────────────────────────────────────────────────────
+
+enum CibleNotification {
+  TOUS
+  INDIVIDUEL
+  MULTIPLE
+}
+
+model NotificationAdmin {
+  id         String             @id @default(cuid())
+  adminId    String
+  admin      Admin              @relation(fields: [adminId], references: [id])
+  titre      String
+  message    String
+  type       TypeNotification
+  cible      CibleNotification
+  escortIds  String[]           // vide = tous
+  createdAt  DateTime           @default(now())
+
+  @@map("notifications_admin")
+}
+
+// ─────────────────────────────────────────────────────────
+// CODE DE RÉINITIALISATION MOT DE PASSE
+// ─────────────────────────────────────────────────────────
+
+model CodeReinit {
+  id        String   @id @default(cuid())
+  email     String   // email de l'escort concernée
+  code      String   // code à 6 chiffres (hashé en base)
+  expiresAt DateTime // expire après 15 minutes
+  utilise   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([email])
+  @@map("codes_reinit")
+}

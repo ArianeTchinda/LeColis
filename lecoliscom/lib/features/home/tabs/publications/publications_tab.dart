@@ -64,7 +64,7 @@ class _PublicationsTabState extends State<PublicationsTab> {
       }
     }
     pool.shuffle(Random());
-    final seen   = <int>{};
+    final seen   = <String>{};
     final result = <PublicationModel>[];
     for (final pub in pool) {
       if (seen.add(pub.id)) result.add(pub);

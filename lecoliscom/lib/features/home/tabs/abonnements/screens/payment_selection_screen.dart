@@ -44,24 +44,44 @@ class TaraPaymentLinks {
 }
 
 // ─────────────────────────────────────────────────────────
-// MODES DE PAIEMENT
+// MODES DE PAIEMENT — tous les moyens disponibles sur TaraMoney
+// Source : taramoney.com/# (section "Nos Méthodes Paiement")
 // ─────────────────────────────────────────────────────────
-enum ModePaiement { orangeMoney, mtnMomo, carte }
+enum ModePaiement {
+  orangeMoney,
+  mtnMomo,
+  wave,
+  visa,
+  mastercard,
+  paypal,
+  googlePay,
+  amazonPay,
+}
 
 extension ModePaiementExt on ModePaiement {
   String get label {
     switch (this) {
       case ModePaiement.orangeMoney: return 'Orange Money';
       case ModePaiement.mtnMomo:     return 'MTN MoMo';
-      case ModePaiement.carte:       return 'Carte bancaire';
+      case ModePaiement.wave:        return 'Wave';
+      case ModePaiement.visa:        return 'Carte Visa';
+      case ModePaiement.mastercard:  return 'Mastercard';
+      case ModePaiement.paypal:      return 'PayPal';
+      case ModePaiement.googlePay:   return 'Google Pay';
+      case ModePaiement.amazonPay:   return 'Amazon Pay';
     }
   }
 
   String get sousTitre {
     switch (this) {
-      case ModePaiement.orangeMoney: return 'Paiement via Orange Money Cameroun';
-      case ModePaiement.mtnMomo:     return 'Paiement via MTN Mobile Money';
-      case ModePaiement.carte:       return 'Visa / Mastercard';
+      case ModePaiement.orangeMoney: return 'Mobile Money — Orange Cameroun';
+      case ModePaiement.mtnMomo:     return 'Mobile Money — MTN Cameroun';
+      case ModePaiement.wave:        return 'Paiement instantané via Wave';
+      case ModePaiement.visa:        return 'Carte bancaire Visa internationale';
+      case ModePaiement.mastercard:  return 'Carte bancaire Mastercard internationale';
+      case ModePaiement.paypal:      return 'Compte PayPal (paiement international)';
+      case ModePaiement.googlePay:   return 'Paiement rapide via Google Pay';
+      case ModePaiement.amazonPay:   return 'Paiement via Amazon Pay';
     }
   }
 
@@ -69,7 +89,12 @@ extension ModePaiementExt on ModePaiement {
     switch (this) {
       case ModePaiement.orangeMoney: return const Color(0xFFFF6600);
       case ModePaiement.mtnMomo:     return const Color(0xFFFFCC00);
-      case ModePaiement.carte:       return const Color(0xFF5DB8FF);
+      case ModePaiement.wave:        return const Color(0xFF1DC8FF);
+      case ModePaiement.visa:        return const Color(0xFF1A1F71);
+      case ModePaiement.mastercard:  return const Color(0xFFEB001B);
+      case ModePaiement.paypal:      return const Color(0xFF003087);
+      case ModePaiement.googlePay:   return const Color(0xFF4285F4);
+      case ModePaiement.amazonPay:   return const Color(0xFFFF9900);
     }
   }
 
@@ -77,11 +102,57 @@ extension ModePaiementExt on ModePaiement {
     switch (this) {
       case ModePaiement.orangeMoney: return Icons.phone_android_rounded;
       case ModePaiement.mtnMomo:     return Icons.phone_android_rounded;
-      case ModePaiement.carte:       return Icons.credit_card_rounded;
+      case ModePaiement.wave:        return Icons.waves_rounded;
+      case ModePaiement.visa:        return Icons.credit_card_rounded;
+      case ModePaiement.mastercard:  return Icons.credit_card_rounded;
+      case ModePaiement.paypal:      return Icons.account_balance_wallet_rounded;
+      case ModePaiement.googlePay:   return Icons.g_mobiledata_rounded;
+      case ModePaiement.amazonPay:   return Icons.shopping_bag_rounded;
     }
   }
 
-  bool get necessiteNumero => this != ModePaiement.carte;
+  /// Catégorie pour regrouper visuellement
+  String get categorie {
+    switch (this) {
+      case ModePaiement.orangeMoney:
+      case ModePaiement.mtnMomo:
+      case ModePaiement.wave:
+        return 'Mobile Money';
+      case ModePaiement.visa:
+      case ModePaiement.mastercard:
+        return 'Carte bancaire';
+      case ModePaiement.paypal:
+      case ModePaiement.googlePay:
+      case ModePaiement.amazonPay:
+        return 'Paiement international';
+    }
+  }
+
+  /// Nécessite un numéro de téléphone (Mobile Money)
+  bool get necessiteNumero {
+    switch (this) {
+      case ModePaiement.orangeMoney:
+      case ModePaiement.mtnMomo:
+      case ModePaiement.wave:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  /// Nécessite un email (cartes et wallets internationaux)
+  bool get necessiteEmail {
+    switch (this) {
+      case ModePaiement.visa:
+      case ModePaiement.mastercard:
+      case ModePaiement.paypal:
+      case ModePaiement.googlePay:
+      case ModePaiement.amazonPay:
+        return true;
+      default:
+        return false;
+    }
+  }
 }
 
 // ─────────────────────────────────────────────────────────
@@ -235,22 +306,19 @@ class _PaymentSelectionScreenState extends State<PaymentSelectionScreen> {
 
                   const SizedBox(height: 28),
 
-                  // ── 2. CHOIX DU MODE ──
+                  // ── 2. CHOIX DU MODE + FORMULAIRE INLINE ──
                   _SectionLabel(text: 'Mode de paiement'),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Sélectionnez un mode — le formulaire s\'affiche directement.',
+                    style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+                  ),
                   const SizedBox(height: 12),
-                  _buildModesRow(),
-
-                  const SizedBox(height: 24),
-
-                  // ── 3. FORMULAIRE ──
-                  _SectionLabel(text: 'Vos informations'),
-                  const SizedBox(height: 12),
-                  _buildFormulaire(),
-
-                  const SizedBox(height: 10),
+                  _buildModesAccordion(),
 
                   // Message erreur
-                  if (_erreur != null)
+                  if (_erreur != null) ...[
+                    const SizedBox(height: 10),
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
@@ -267,10 +335,11 @@ class _PaymentSelectionScreenState extends State<PaymentSelectionScreen> {
                                 color: Color(0xFFFF5252), fontSize: 13))),
                       ]),
                     ),
+                  ],
 
                   const SizedBox(height: 28),
 
-                  // ── 4. BOUTON CTA ──
+                  // ── 3. BOUTON CTA ──
                   _buildCTA(color),
 
                   const SizedBox(height: 16),
@@ -330,123 +399,176 @@ class _PaymentSelectionScreenState extends State<PaymentSelectionScreen> {
   }
 
   // ─────────────────────────────────────────────────────
-  // MODES DE PAIEMENT (chips sélectionnables)
+  // MODES DE PAIEMENT — accordion avec formulaire inline
   // ─────────────────────────────────────────────────────
-  Widget _buildModesRow() {
-    return Column(
-      children: ModePaiement.values.map((mode) {
-        final isSelected = _mode == mode;
-        final color      = mode.couleur;
+  Widget _buildModesAccordion() {
+    final categories = <String, List<ModePaiement>>{};
+    for (final mode in ModePaiement.values) {
+      categories.putIfAbsent(mode.categorie, () => []).add(mode);
+    }
 
-        return GestureDetector(
-          onTap: () => setState(() => _mode = mode),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            margin: const EdgeInsets.only(bottom: 10),
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-            decoration: BoxDecoration(
-              color: isSelected
-                  ? color.withOpacity(0.10)
-                  : AppColors.surface,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: isSelected ? color.withOpacity(0.45) : AppColors.divider,
-                width: isSelected ? 1.5 : 1,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: categories.entries.map((entry) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Label de catégorie
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8, top: 4),
+              child: Text(
+                entry.key.toUpperCase(),
+                style: const TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textMuted,
+                  letterSpacing: 1.2,
+                ),
               ),
             ),
-            child: Row(children: [
-              // Icône colorée
-              Container(
-                width:  40, height: 40,
+            // Modes de cette catégorie
+            ...entry.value.map((mode) {
+              final isSelected = _mode == mode;
+              final color      = mode.couleur;
+
+              return AnimatedContainer(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeInOut,
+                margin: const EdgeInsets.only(bottom: 8),
                 decoration: BoxDecoration(
-                  color:  color.withOpacity(0.13),
-                  shape:  BoxShape.circle,
-                ),
-                child: Icon(mode.icone, color: color, size: 20),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(mode.label,
-                      style: TextStyle(
-                        fontSize:   14,
-                        fontWeight: FontWeight.w600,
-                        color:      isSelected ? AppColors.textPrimary : AppColors.textSecondary,
-                      )),
-                  Text(mode.sousTitre,
-                      style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
-                ]),
-              ),
-              // Radio visuel
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                width:  20, height: 20,
-                decoration: BoxDecoration(
-                  shape:  BoxShape.circle,
+                  color: isSelected ? color.withOpacity(0.07) : AppColors.surface,
+                  borderRadius: BorderRadius.circular(16),
                   border: Border.all(
-                    color: isSelected ? color : AppColors.divider,
-                    width: isSelected ? 5 : 2,
+                    color: isSelected ? color.withOpacity(0.55) : AppColors.divider,
+                    width: isSelected ? 1.5 : 1,
                   ),
+                  boxShadow: isSelected ? [
+                    BoxShadow(
+                      color: color.withOpacity(0.12),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ] : null,
                 ),
-              ),
-            ]),
-          ),
+                child: Column(
+                  children: [
+                    // ── En-tête du mode ──
+                    GestureDetector(
+                      onTap: () => setState(() => _mode = mode),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+                        child: Row(children: [
+                          Container(
+                            width: 38, height: 38,
+                            decoration: BoxDecoration(
+                              color: color.withOpacity(0.12),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(mode.icone, color: color, size: 18),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Text(mode.label,
+                                  style: TextStyle(
+                                    fontSize:   13,
+                                    fontWeight: FontWeight.w600,
+                                    color: isSelected ? AppColors.textPrimary : AppColors.textSecondary,
+                                  )),
+                              Text(mode.sousTitre,
+                                  style: const TextStyle(fontSize: 10, color: AppColors.textMuted)),
+                            ]),
+                          ),
+                          // Radio visuel
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            width: 18, height: 18,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: isSelected ? color : AppColors.divider,
+                                width: isSelected ? 5 : 2,
+                              ),
+                            ),
+                          ),
+                        ]),
+                      ),
+                    ),
+
+                    // ── Formulaire inline (accordéon) ──
+                    AnimatedCrossFade(
+                      duration: const Duration(milliseconds: 250),
+                      firstCurve: Curves.easeOut,
+                      secondCurve: Curves.easeIn,
+                      crossFadeState: isSelected
+                          ? CrossFadeState.showFirst
+                          : CrossFadeState.showSecond,
+                      firstChild: Container(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Divider(color: color.withOpacity(0.20), height: 16),
+                            const SizedBox(height: 4),
+                            // Nom complet
+                            _ChampTexte(
+                              controller: _nomCtrl,
+                              label:      'Nom complet',
+                              hint:       'Ex : Jean Dupont',
+                              icone:      Icons.person_outline_rounded,
+                              clavier:    TextInputType.name,
+                              validateur: (v) => (v == null || v.trim().isEmpty)
+                                  ? 'Veuillez entrer votre nom' : null,
+                            ),
+                            const SizedBox(height: 12),
+                            // Numéro ou email selon le mode
+                            if (mode.necessiteNumero)
+                              _ChampTexte(
+                                controller: _telCtrl,
+                                label:      'Numéro ${mode.label}',
+                                hint:       'Ex : 6XX XXX XXX',
+                                icone:      Icons.phone_outlined,
+                                clavier:    TextInputType.phone,
+                                prefixText: '+237 ',
+                                validateur: (v) {
+                                  if (v == null || v.trim().isEmpty) return 'Numéro requis';
+                                  if (v.trim().replaceAll(' ', '').length < 8)
+                                    return 'Numéro invalide';
+                                  return null;
+                                },
+                              )
+                            else if (mode.necessiteEmail)
+                              _ChampTexte(
+                                controller: _emailCtrl,
+                                label:      'Email associé à ${mode.label}',
+                                hint:       'votre@email.com',
+                                icone:      Icons.email_outlined,
+                                clavier:    TextInputType.emailAddress,
+                                validateur: (v) {
+                                  if (v == null || v.trim().isEmpty) return 'Email requis';
+                                  if (!v.contains('@')) return 'Email invalide';
+                                  return null;
+                                },
+                              ),
+                          ],
+                        ),
+                      ),
+                      secondChild: const SizedBox.shrink(),
+                    ),
+                  ],
+                ),
+              );
+            }),
+            const SizedBox(height: 4),
+          ],
         );
       }).toList(),
     );
   }
 
-  // ─────────────────────────────────────────────────────
-  // FORMULAIRE SELON LE MODE
-  // ─────────────────────────────────────────────────────
-  Widget _buildFormulaire() {
-    return Column(
-      children: [
-        // Nom complet (toujours présent)
-        _ChampTexte(
-          controller:  _nomCtrl,
-          label:       'Nom complet',
-          hint:        'Ex : Jean Dupont',
-          icone:       Icons.person_outline_rounded,
-          clavier:     TextInputType.name,
-          validateur:  (v) => (v == null || v.trim().isEmpty)
-              ? 'Veuillez entrer votre nom' : null,
-        ),
-
-        const SizedBox(height: 14),
-
-        // Numéro (OM / MoMo) ou email (carte)
-        if (_mode.necessiteNumero)
-          _ChampTexte(
-            controller: _telCtrl,
-            label:      'Numéro ${_mode.label}',
-            hint:       'Ex : 6XX XXX XXX',
-            icone:      Icons.phone_outlined,
-            clavier:    TextInputType.phone,
-            prefixText: '+237 ',
-            validateur: (v) {
-              if (v == null || v.trim().isEmpty) return 'Numéro requis';
-              if (v.trim().replaceAll(' ', '').length < 8)
-                return 'Numéro invalide';
-              return null;
-            },
-          )
-        else
-          _ChampTexte(
-            controller: _emailCtrl,
-            label:      'Email',
-            hint:       'votre@email.com',
-            icone:      Icons.email_outlined,
-            clavier:    TextInputType.emailAddress,
-            validateur: (v) {
-              if (v == null || v.trim().isEmpty) return 'Email requis';
-              if (!v.contains('@')) return 'Email invalide';
-              return null;
-            },
-          ),
-      ],
-    );
-  }
+  // Conservé pour compatibilité mais plus utilisé directement
+  // ignore: unused_element
+  Widget _buildModesRow() => _buildModesAccordion();
 
   // ─────────────────────────────────────────────────────
   // BOUTON CTA

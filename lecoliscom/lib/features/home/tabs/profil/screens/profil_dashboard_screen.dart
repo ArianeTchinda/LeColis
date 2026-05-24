@@ -5,6 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../../../core/constants/app_colors.dart';
 import '/core/models/escort_model.dart';
+import '../../../../../core/models/abonnement_model.dart';
+import '../../../../../core/models/publication_model.dart';
+import '../../../../../core/services/profil_service.dart';
 import '../widgets/image_editor_screen.dart';
 import 'publication_form_screen.dart';
 
@@ -33,11 +36,14 @@ class _ProfilDashboardState extends State<ProfilDashboard> {
   final ValueNotifier<String> _searchQuery = ValueNotifier('');
   Uint8List? _photoProfilBytes; // photo modifiée via éditeur
 
-  // Plan mock
-  final _planNom          = 'Standard';
-  final _planCouleur      = Color(0xFF5DB8FF);
-  final _planPubMax       = 3;
-  final _planJoursRestants = 22;
+  // Plan réel (chargé depuis l'API)
+  AbonnementSouscrit? _abonnement;
+  bool _chargement = true;
+
+  String get _planNom           => _abonnement?.plan.nom ?? '—';
+  Color  get _planCouleur       => _abonnement?.plan.accentColor ?? const Color(0xFF8A8A9A);
+  int    get _planPubMax        => _abonnement?.quotaTotal ?? 0;
+  int    get _planJoursRestants => _abonnement?.joursRestants ?? 0;
 
   int get _nonLues    => _notifications.where((n) => !n.lue).length;
   int get _pubActives => _publications.where((p) => p.statut == StatutPublication.active).length;
@@ -47,11 +53,65 @@ class _ProfilDashboardState extends State<ProfilDashboard> {
   void initState() {
     super.initState();
     _escort        = widget.escort;
-    _publications  = List.from(mockPublicationsEscort);
-    _notifications = List.from(mockNotifications);
-    _searchCtrl.addListener(() {
-      _searchQuery.value = _searchCtrl.text.trim().toLowerCase();
-    });
+    _publications  = [];
+    _notifications = [];
+    _searchCtrl.addListener(
+        () => _searchQuery.value = _searchCtrl.text.trim().toLowerCase());
+    _chargerDonnees();
+  }
+
+  Future<void> _chargerDonnees() async {
+    // Récupère le token depuis ton SessionManager (adapte l'import si nécessaire)
+    final token = SessionManager().accessToken;
+    if (token == null) {
+      if (mounted) setState(() => _chargement = false);
+      return;
+    }
+    final svc = ProfilService(token);
+    try {
+      final results = await Future.wait([
+        svc.getAbonnement(),
+        svc.getMesPublications(),
+        svc.getNotifications(),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _abonnement    = results[0] as AbonnementSouscrit?;
+        final pubs     = results[1] as List<PublicationModel>;
+        _publications  = pubs.map((p) => PublicationGestion(
+          id:             p.id,
+          titre:          p.titre,
+          categorie:      p.categorie,
+          imageUrl:       p.imageUrl.isNotEmpty ? p.imageUrl : null,
+          statut:         p.estActive
+              ? StatutPublication.active
+              : StatutPublication.expiree,
+          vues:           p.vues,
+          dateExpiration: p.dateExpiration,
+        )).toList();
+        final notifs   = results[2] as List<NotificationApiModel>;
+        _notifications = notifs.map((n) => NotificationModel(
+          id:      n.id,
+          type:    _parseTypeNotif(n.type),
+          titre:   n.titre,
+          message: n.message,
+          date:    n.date,
+          lue:     n.lue,
+        )).toList();
+        _chargement = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _chargement = false);
+    }
+  }
+
+  TypeNotification _parseTypeNotif(String t) {
+    switch (t) {
+      case 'ADMIN':       return TypeNotification.admin;
+      case 'ABONNEMENT':  return TypeNotification.abonnement;
+      case 'PUBLICATION': return TypeNotification.publication;
+      default:            return TypeNotification.systeme;
+    }
   }
 
   @override
@@ -91,10 +151,18 @@ class _ProfilDashboardState extends State<ProfilDashboard> {
                 style: TextStyle(color: AppColors.textMuted)),
           ),
           TextButton(
-            onPressed: () {
-              setState(() => _publications.remove(pub));
+            onPressed: () async {
               Navigator.pop(context);
-              _snack('Publication supprimée', color: const Color(0xFFFF5252));
+              final token = SessionManager().accessToken;
+              if (token != null) {
+                try {
+                  await ProfilService(token).supprimerPublication(pub.id);
+                } catch (_) {}
+              }
+              if (mounted) {
+                setState(() => _publications.remove(pub));
+                _snack('Publication supprimée', color: const Color(0xFFFF5252));
+              }
             },
             child: const Text('Supprimer',
                 style: TextStyle(color: Color(0xFFFF5252))),
@@ -160,8 +228,28 @@ class _ProfilDashboardState extends State<ProfilDashboard> {
   // Ouvre l'éditeur d'image pour la photo de profil
   Future<void> _changerPhotoProfil() async {
     final bytes = await ouvrirEditeurImage(context);
-    if (bytes != null) {
-      setState(() => _photoProfilBytes = bytes);
+    if (bytes == null || !mounted) return;
+    setState(() => _photoProfilBytes = bytes);
+
+    final token = SessionManager().accessToken;
+    if (token != null) {
+      try {
+        final url = await ProfilService(token)
+            .updatePhoto(bytes, 'profil_${DateTime.now().millisecondsSinceEpoch}.jpg');
+        if (mounted) {
+          setState(() {
+            _escort = EscortModel(
+              id:              _escort.id,
+              pseudo:          _escort.pseudo,
+              email:           _escort.email,
+              telephone:       _escort.telephone,
+              photoUrl:        url,
+              estVerifie:      _escort.estVerifie,
+              dateInscription: _escort.dateInscription,
+            );
+          });
+        }
+      } catch (_) {}
     }
   }
 
@@ -229,6 +317,12 @@ class _ProfilDashboardState extends State<ProfilDashboard> {
 
   @override
   Widget build(BuildContext context) {
+    if (_chargement) {
+      return const Center(
+        child: CircularProgressIndicator(color: AppColors.primaryPink),
+      );
+    }
+
     final w         = MediaQuery.of(context).size.width;
     final isMobile  = w < 700;
     final isDesktop = w >= 1100;
@@ -1212,23 +1306,32 @@ class _EditProfilSheetState extends State<_EditProfilSheet> {
 
           // Bouton sauvegarder
           GestureDetector(
-            onTap: () {
-              widget.onSave(
-                EscortModel(
-                  id: widget.escort.id,
-                  pseudo: _pseudoCtrl.text.trim().isEmpty
-                      ? widget.escort.pseudo
-                      : _pseudoCtrl.text.trim(),
-                  email: widget.escort.email,
-                  telephone: _telCtrl.text.trim().isEmpty
-                      ? widget.escort.telephone
-                      : _telCtrl.text.trim(),
-                  photoUrl: widget.escort.photoUrl,
-                  estVerifie: widget.escort.estVerifie,
-                  dateInscription: widget.escort.dateInscription,
-                ),
-              );
-              Navigator.pop(context);
+            onTap: () async {
+              final pseudo = _pseudoCtrl.text.trim().isEmpty
+                  ? widget.escort.pseudo
+                  : _pseudoCtrl.text.trim();
+              final tel = _telCtrl.text.trim().isEmpty
+                  ? widget.escort.telephone
+                  : _telCtrl.text.trim();
+
+              final token = SessionManager().accessToken;
+              if (token != null) {
+                try {
+                  await ProfilService(token)
+                      .updateProfil(pseudo: pseudo, telephone: tel);
+                } catch (_) {}
+              }
+
+              widget.onSave(EscortModel(
+                id:              widget.escort.id,
+                pseudo:          pseudo,
+                email:           widget.escort.email,
+                telephone:       tel,
+                photoUrl:        widget.escort.photoUrl,
+                estVerifie:      widget.escort.estVerifie,
+                dateInscription: widget.escort.dateInscription,
+              ));
+              if (context.mounted) Navigator.pop(context);
             },
             child: Container(
               width: double.infinity,

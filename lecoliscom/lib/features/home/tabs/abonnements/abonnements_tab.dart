@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/models/abonnement_model.dart';
 import '../../../../core/models/transaction_model.dart';
@@ -213,18 +214,24 @@ class _AbonnementsTabState extends State<AbonnementsTab>
         return SingleChildScrollView(
           padding: EdgeInsets.fromLTRB(hPad, 16, hPad, 100),
           child: isDesktop
-            ? Row(crossAxisAlignment: CrossAxisAlignment.start, children: filtered.map((plan) =>
-                Expanded(child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: _PlanCard(
-                    plan: plan,
-                    isActuel: plan.id == activePlanId,
-                    estConnecte: estConnecte,
-                    onTap: () => estConnecte
-                        ? _allerAuPaiement(plan)
-                        : _goToLogin(), // ← MODIFIÉ
-                  ),
-                ))).toList())
+            ? Column(
+                children: [
+                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: filtered.map((plan) =>
+                      Expanded(child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        child: _PlanCard(
+                          plan: plan,
+                          isActuel: plan.id == activePlanId,
+                          estConnecte: estConnecte,
+                          onTap: () => estConnecte
+                              ? _allerAuPaiement(plan)
+                              : _goToLogin(),
+                        ),
+                      ))).toList()),
+                  const SizedBox(height: 32),
+                  _AppDownloadBanner(),
+                ],
+              )
             : Column(children: filtered.map((plan) => Padding(
                 padding: const EdgeInsets.only(bottom: 16),
                 child: _PlanCard(
@@ -233,7 +240,7 @@ class _AbonnementsTabState extends State<AbonnementsTab>
                   estConnecte: estConnecte,
                   onTap: () => estConnecte
                       ? _allerAuPaiement(plan)
-                      : _goToLogin(), // ← MODIFIÉ
+                      : _goToLogin(),
                 ),
               )).toList()),
         );
@@ -411,6 +418,156 @@ class _AbonnementsTabState extends State<AbonnementsTab>
       ),
     ]),
   ));
+}
+
+// ═══════════════════════════════════════════════════════════
+// APP DOWNLOAD BANNER — desktop uniquement (sous la liste des plans)
+// ═══════════════════════════════════════════════════════════
+class _AppDownloadBanner extends StatelessWidget {
+  const _AppDownloadBanner();
+
+  // ── Remplacez ces URLs par vos vrais liens Google Drive ──
+  static const String _driveAndroid = 'https://drive.google.com/drive/folders/VOTRE_DOSSIER_ANDROID';
+  static const String _driveIOS     = 'https://drive.google.com/drive/folders/VOTRE_DOSSIER_IOS';
+
+  Future<void> _ouvrir(String url) async {
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 22),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: AppColors.divider),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            AppColors.primaryPink.withOpacity(0.06),
+            const Color(0xFFB68DFF).withOpacity(0.06),
+          ],
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFFFF5DA8), Color(0xFFB68DFF)],
+              ),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Icon(Icons.phone_iphone_rounded, color: Colors.white, size: 26),
+          ),
+          const SizedBox(width: 20),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Emportez LeColis dans votre poche',
+                  style: GoogleFonts.cormorantGaramond(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Téléchargez le fichier APK pour installer LeColis directement sur votre appareil Android ou iOS.',
+                  style: TextStyle(fontSize: 12, color: AppColors.textMuted, height: 1.5),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 20),
+          Row(
+            children: [
+              _StoreBadge(
+                icon:     Icons.android_rounded,
+                label:    'Android APK',
+                sousTitre: 'Télécharger via Drive',
+                color:    const Color(0xFF25D366),
+                url:      _driveAndroid,
+                disponible: true,
+                onTap:    () => _ouvrir(_driveAndroid),
+              ),
+              const SizedBox(width: 10),
+              _StoreBadge(
+                icon:     Icons.apple_rounded,
+                label:    'iOS APK',
+                sousTitre: 'Télécharger via Drive',
+                color:    const Color(0xFF888888),
+                url:      _driveIOS,
+                disponible: true,
+                onTap:    () => _ouvrir(_driveIOS),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StoreBadge extends StatelessWidget {
+  final IconData icon;
+  final String   label;
+  final String   sousTitre;
+  final Color    color;
+  final String   url;
+  final bool     disponible;
+  final VoidCallback? onTap;
+
+  const _StoreBadge({
+    required this.icon,
+    required this.label,
+    required this.sousTitre,
+    required this.color,
+    required this.url,
+    required this.disponible,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: disponible ? onTap : null,
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 200),
+        opacity: disponible ? 1.0 : 0.50,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: color.withOpacity(0.25)),
+          ),
+          child: Row(children: [
+            Icon(icon, color: color, size: 22),
+            const SizedBox(width: 10),
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(label, style: TextStyle(
+                color: color, fontSize: 13, fontWeight: FontWeight.w700)),
+              Text(sousTitre, style: const TextStyle(
+                color: AppColors.textMuted, fontSize: 10)),
+            ]),
+            if (disponible) ...[
+              const SizedBox(width: 8),
+              Icon(Icons.download_rounded, color: color, size: 16),
+            ],
+          ]),
+        ),
+      ),
+    );
+  }
 }
 
 // ═══════════════════════════════════════════════════════════

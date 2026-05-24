@@ -31,7 +31,7 @@ extension PlanTypeExt on PlanType {
 }
 
 class PublicationModel {
-  final int    id;
+  final String id;           // ← String (cuid Prisma, pas int)
   final String escortPseudo;
   final String escortImageProfil;
   final List<String> imageUrls;
@@ -48,19 +48,22 @@ class PublicationModel {
   // ── Contacts ──
   final String  telephone;
   final String  whatsapp;
-  final String? email;        // ← NOUVEAU (optionnel)
+  final String? email;
 
   final PlanType planType;
   final bool     estVerifie;
 
   /// [estDisponible] indique si l'escort se déclare disponible pour des RDV.
   /// Ce champ est INDÉPENDANT de la visibilité de la publication.
-  /// La visibilité est dictée uniquement par [dateExpiration] (abonnement actif).
+  /// La visibilité est dictée uniquement par [dateExpiration].
   final bool estDisponible;
 
   final double?  tarif;
-  final DateTime dateExpiration; // Fin de l'abonnement lié à cette publication
+  final DateTime dateExpiration;
   final int      vues;
+
+  // ── Avis ──
+  final List<AvisModel> avis;
 
   const PublicationModel({
     required this.id,
@@ -70,26 +73,26 @@ class PublicationModel {
     required this.titre,
     required this.description,
     required this.categorie,
-    this.pays    = 'Cameroun',
-    this.region  = '',
+    this.pays     = 'Cameroun',
+    this.region   = '',
     required this.ville,
     required this.quartier,
     required this.telephone,
     required this.whatsapp,
-    this.email,                  // ← NOUVEAU
+    this.email,
     required this.planType,
     required this.estVerifie,
     required this.estDisponible,
     required this.tarif,
     required this.dateExpiration,
     required this.vues,
+    this.avis = const [],
   });
 
   /// Image principale (vignette carte)
   String get imageUrl => imageUrls.isNotEmpty ? imageUrls.first : '';
 
-  /// Une publication est visible dans la liste uniquement si
-  /// l'abonnement associé est encore actif (dateExpiration non dépassée).
+  /// Visible uniquement si l'abonnement est encore actif
   bool get estActive => dateExpiration.isAfter(DateTime.now());
 
   /// Localisation affichable compacte
@@ -107,211 +110,70 @@ class PublicationModel {
       case PlanType.basique:  return 1;
     }
   }
+
+  /// Construit depuis la réponse JSON du backend (GET /publications ou GET /publications/:id)
+  /// Structure backend : { id, titre, description, estDisponible, tarif, statut,
+  ///   vues, dateExpiration, planType, villeNom, regionNom, paysNom,
+  ///   quartier:{nom}, images:[{url}], categories:[{nom}],
+  ///   escort:{pseudo, photoUrl, telephone, email, estVerifie},
+  ///   avis:[{id, note, message, createdAt}] }
+  factory PublicationModel.fromJson(Map<String, dynamic> j) {
+    // Images
+    final images   = (j['images'] as List?) ?? [];
+    final imageUrls = images.map<String>((img) => img['url'] as String).toList();
+
+    // Catégorie principale (première de la liste)
+    final cats       = (j['categories'] as List?) ?? [];
+    final categorie  = cats.isNotEmpty ? (cats.first['nom'] ?? '') : '';
+
+    // Escort
+    final escort = j['escort'] as Map<String, dynamic>? ?? {};
+
+    // Avis
+    final avisRaw = (j['avis'] as List?) ?? [];
+    final avis    = avisRaw.map((a) => AvisModel.fromJson(a, j['id'])).toList();
+
+    // PlanType
+    PlanType parsePlanType(String? s) {
+      switch ((s ?? '').toLowerCase()) {
+        case 'premium':  return PlanType.premium;
+        case 'standard': return PlanType.standard;
+        default:         return PlanType.basique;
+      }
+    }
+
+    return PublicationModel(
+      id:                 j['id'],
+      escortPseudo:       escort['pseudo']   ?? '',
+      escortImageProfil:  escort['photoUrl'] ?? '',
+      imageUrls:          imageUrls,
+      titre:              j['titre']         ?? '',
+      description:        j['description']   ?? '',
+      categorie:          categorie,
+      pays:               j['paysNom']       ?? 'Cameroun',
+      region:             j['regionNom']     ?? '',
+      ville:              j['villeNom']      ?? '',
+      quartier:           j['quartier']?['nom'] ?? '',
+      telephone:          escort['telephone'] ?? '',
+      whatsapp:           escort['whatsapp']  ?? escort['telephone'] ?? '',
+      email:              escort['email'],
+      planType:           parsePlanType(j['planType']),
+      estVerifie:         escort['estVerifie'] ?? false,
+      estDisponible:      j['estDisponible']   ?? false,
+      tarif:              (j['tarif'] as num?)?.toDouble(),
+      dateExpiration:     DateTime.parse(j['dateExpiration']),
+      vues:               j['vues'] ?? 0,
+      avis:               avis,
+    );
+  }
 }
-
-// ─────────────────────────────────────────────────────────
-// DONNÉES MOCK
-// ─────────────────────────────────────────────────────────
-final List<PublicationModel> mockPublications = [
-  PublicationModel(
-    id: 1,
-    escortPseudo: 'Sofia K.',
-    escortImageProfil: 'https://randomuser.me/api/portraits/women/11.jpg',
-    imageUrls: [
-      'https://cdni.pornpics.com/1280/7/101/15166976/15166976_001_4c81.jpg',
-      'https://cdni.pornpics.com/1280/7/101/15166976/15166976_039_4306.jpg',
-      'https://cdni.pornpics.com/1280/7/101/15166976/15166976_046_3d4b.jpg',
-    ],
-    titre: 'Moment de détente et douceur',
-    description: 'Je propose des moments de qualité dans un cadre discret et chaleureux. Disponible en soirée. Appel uniquement.',
-    categorie: 'Milf',
-    pays: 'Cameroun', region: 'Centre',
-    ville: 'Yaoundé', quartier: 'Bonanjo',
-    telephone: '+237600000001',
-    whatsapp:  '+237600000001',
-    email:     'sofia.k@proton.me',
-    planType: PlanType.premium,
-    estVerifie: true, estDisponible: true,
-    tarif: 50000,
-    dateExpiration: DateTime.now().add(const Duration(days: 20)),
-    vues: 340,
-  ),
-  PublicationModel(
-    id: 2,
-    escortPseudo: 'Naomi B.',
-    escortImageProfil: 'https://randomuser.me/api/portraits/women/22.jpg',
-    imageUrls: [
-      'https://cdni.pornpics.com/1280/7/484/53822931/53822931_049_4205.jpg',
-      'https://cdni.pornpics.com/1280/7/484/53822931/53822931_100_6dde.jpg',
-    ],
-    titre: 'Élégance et complicité',
-    description: 'Belle et raffinée, je vous propose une expérience inoubliable.',
-    categorie: 'Ebony',
-    pays: 'Cameroun', region: 'Littoral',
-    ville: 'Douala', quartier: 'Bonanjo',
-    telephone: '+237600000002',
-    whatsapp:  '+237600000002',
-    email:     'naomi.b@proton.me',
-    planType: PlanType.premium,
-    estVerifie: true, estDisponible: true,
-    tarif: 45000,
-    dateExpiration: DateTime.now().add(const Duration(days: 15)),
-    vues: 280,
-  ),
-  PublicationModel(
-    id: 3,
-    escortPseudo: 'Bella R.',
-    escortImageProfil: 'https://randomuser.me/api/portraits/women/33.jpg',
-    imageUrls: [
-      'https://cdni.pornpics.com/1280/7/840/90695987/90695987_009_2bf0.jpg',
-      'https://cdni.pornpics.com/1280/7/840/90695987/90695987_097_290a.jpg',
-      'https://cdni.pornpics.com/1280/7/840/90695987/90695987_102_faf7.jpg',
-      'https://cdni.pornpics.com/1280/7/840/90695987/90695987_040_f80f.jpg',
-    ],
-    titre: 'Disponible ce soir',
-    description: 'Jeune femme dynamique, douce et attentionnée.',
-    categorie: 'Latina',
-    pays: 'Cameroun', region: 'Centre',
-    ville: 'Yaoundé', quartier: 'Nlongkak',
-    telephone: '+237600000003',
-    whatsapp:  '+237600000003',
-    // pas d'email → null
-    planType: PlanType.standard,
-    estVerifie: true, estDisponible: true,
-    tarif: 30000,
-    dateExpiration: DateTime.now().add(const Duration(days: 5)),
-    vues: 120,
-  ),
-  PublicationModel(
-    id: 4,
-    escortPseudo: 'Candy M.',
-    escortImageProfil: 'https://randomuser.me/api/portraits/women/44.jpg',
-    imageUrls: [
-      'https://cdni.pornpics.com/1280/7/79/91215820/91215820_022_c227.jpg',
-      'https://cdni.pornpics.com/1280/7/79/91215820/91215820_084_3aaa.jpg',
-    ],
-    titre: 'Douceur garantie',
-    description: 'Ronde et généreuse, pour ceux qui aiment les vraies courbes.',
-    categorie: 'BBW',
-    pays: 'Cameroun', region: 'Littoral',
-    ville: 'Douala', quartier: 'Akwa',
-    telephone: '+237600000004',
-    whatsapp:  '+237600000004',
-    email:     'candy.m@proton.me',
-    planType: PlanType.standard,
-    estVerifie: false, estDisponible: true,
-    tarif: 25000,
-    dateExpiration: DateTime.now().add(const Duration(days: 3)),
-    vues: 95,
-  ),
-  PublicationModel(
-    id: 5,
-    escortPseudo: 'Jade L.',
-    escortImageProfil: 'https://randomuser.me/api/portraits/women/55.jpg',
-    imageUrls: [
-      'https://cdni.pornpics.com/1280/7/113/28112813/28112813_045_e296.jpg',
-    ],
-    titre: 'Rencontre discrète',
-    description: 'Disponible en semaine, sérieuse et ponctuelle.',
-    categorie: 'Asian',
-    pays: 'Cameroun', region: 'Centre',
-    ville: 'Yaoundé', quartier: 'Mvan',
-    telephone: '+237600000005',
-    whatsapp:  '+237600000005',
-    // Abonnement expiré → cette publication n'apparaîtra PAS dans la liste
-    planType: PlanType.basique,
-    estVerifie: false, estDisponible: false,
-    tarif: 20000,
-    dateExpiration: DateTime.now().subtract(const Duration(days: 1)), // ← expiré
-    vues: 45,
-  ),
-  PublicationModel(
-    id: 6,
-    escortPseudo: 'Nina V.',
-    escortImageProfil: 'https://randomuser.me/api/portraits/women/66.jpg',
-    imageUrls: [
-      'https://cdni.pornpics.com/1280/1/364/54937640/54937640_002_8c39.jpg',
-      'https://cdni.pornpics.com/1280/1/364/54937640/54937640_004_7f5d.jpg',
-      'https://cdni.pornpics.com/1280/1/364/54937640/54937640_003_a744.jpg',
-    ],
-    titre: 'Massage et relaxation',
-    description: 'Experte en massage relaxant, corps et esprit.',
-    categorie: 'Milf',
-    pays: 'Cameroun', region: 'Ouest',
-    ville: 'Bafoussam', quartier: 'Centre',
-    telephone: '+237600000006',
-    whatsapp:  '+237600000006',
-    email:     'nina.v@proton.me',
-    planType: PlanType.premium,
-    estVerifie: true, estDisponible: true,
-    tarif: 55000,
-    dateExpiration: DateTime.now().add(const Duration(days: 25)),
-    vues: 410,
-  ),
-  PublicationModel(
-    id: 7,
-    escortPseudo: 'Eva C.',
-    escortImageProfil: 'https://randomuser.me/api/portraits/women/77.jpg',
-    imageUrls: [
-      'https://cdni.pornpics.com/1280/7/763/13331005/13331005_011_b8af.jpg',
-      'https://cdni.pornpics.com/1280/7/763/13331005/13331005_017_798b.jpg',
-    ],
-    titre: 'Compagnie de qualité',
-    description: 'Pour sorties, dîners ou moments intimes. Bilingue.',
-    categorie: 'Ebony',
-    pays: 'Cameroun', region: 'Centre',
-    ville: 'Yaoundé', quartier: 'Omnisports',
-    telephone: '+237600000007',
-    whatsapp:  '+237600000007',
-    // pas d'email
-    planType: PlanType.standard,
-    estVerifie: true, estDisponible: true,
-    tarif: 35000,
-    dateExpiration: DateTime.now().add(const Duration(days: 8)),
-    vues: 180,
-  ),
-  PublicationModel(
-    id: 8,
-    escortPseudo: 'Tina P.',
-    escortImageProfil: 'https://randomuser.me/api/portraits/women/88.jpg',
-    imageUrls: [
-      'https://cdni.pornpics.com/1280/7/557/16454844/16454844_003_f858.jpg',
-      'https://cdni.pornpics.com/1280/7/557/16454844/16454844_037_898f.jpg',
-      'https://cdni.pornpics.com/1280/7/557/16454844/16454844_060_df62.jpg',
-    ],
-    titre: 'Fraîcheur et spontanéité',
-    description: 'Jeune et pétillante, pour des moments légers.',
-    categorie: 'BBW',
-    pays: 'Cameroun', region: 'Littoral',
-    ville: 'Douala', quartier: 'Deido',
-    telephone: '+237600000008',
-    whatsapp:  '+237600000008',
-    email:     'tina.p@proton.me',
-    planType: PlanType.basique,
-    estVerifie: false, estDisponible: true,
-    tarif: 15000,
-    dateExpiration: DateTime.now().add(const Duration(days: 2)),
-    vues: 60,
-  ),
-];
-
-// ─────────────────────────────────────────────────────────
-// LISTES FILTRE
-// ─────────────────────────────────────────────────────────
-const List<String> categories = [
-  'Toutes', 'Milf', 'BBW', 'Ebony', 'Latina', 'Asian', 'Trans', 'Couple',
-];
-
-const List<String> villes = [
-  'Toutes', 'Yaoundé', 'Douala', 'Bafoussam', 'Garoua', 'Maroua',
-];
 
 // ─────────────────────────────────────────────────────────
 // AVIS ANONYME
 // ─────────────────────────────────────────────────────────
 class AvisModel {
-  final int      id;
-  final int      publicationId;
+  final String   id;
+  final String   publicationId;
   final int      note;
   final String   message;
   final DateTime createdAt;
@@ -323,6 +185,15 @@ class AvisModel {
     required this.message,
     required this.createdAt,
   });
+
+  factory AvisModel.fromJson(Map<String, dynamic> j, String pubId) =>
+      AvisModel(
+        id:            j['id']?.toString() ?? '',
+        publicationId: pubId,
+        note:          j['note'] ?? 0,
+        message:       j['message'] ?? '',
+        createdAt:     DateTime.parse(j['createdAt']),
+      );
 }
 
 // ─────────────────────────────────────────────────────────
@@ -345,15 +216,89 @@ enum SignalementMotif {
 }
 
 // ─────────────────────────────────────────────────────────
+// DONNÉES MOCK (conservées pour les tests hors-réseau)
+// ─────────────────────────────────────────────────────────
+final List<PublicationModel> mockPublications = [
+  PublicationModel(
+    id: 'mock_1',
+    escortPseudo: 'Sofia K.',
+    escortImageProfil: 'https://randomuser.me/api/portraits/women/11.jpg',
+    imageUrls: [
+      'https://picsum.photos/seed/s1a/800/600',
+      'https://picsum.photos/seed/s1b/800/600',
+    ],
+    titre: 'Moment de détente et douceur',
+    description: 'Je propose des moments de qualité dans un cadre discret et chaleureux.',
+    categorie: 'Milf',
+    pays: 'Cameroun', region: 'Centre',
+    ville: 'Yaoundé', quartier: 'Bastos',
+    telephone: '+237600000001', whatsapp: '+237600000001',
+    email: 'sofia.k@proton.me',
+    planType: PlanType.premium,
+    estVerifie: true, estDisponible: true,
+    tarif: 50000,
+    dateExpiration: DateTime.now().add(const Duration(days: 20)),
+    vues: 340,
+  ),
+  PublicationModel(
+    id: 'mock_2',
+    escortPseudo: 'Naomi B.',
+    escortImageProfil: 'https://randomuser.me/api/portraits/women/22.jpg',
+    imageUrls: [
+      'https://picsum.photos/seed/s2a/800/600',
+      'https://picsum.photos/seed/s2b/800/600',
+    ],
+    titre: 'Élégance et complicité',
+    description: 'Belle et raffinée, je vous propose une expérience inoubliable.',
+    categorie: 'Ebony',
+    pays: 'Cameroun', region: 'Littoral',
+    ville: 'Douala', quartier: 'Bonanjo',
+    telephone: '+237600000002', whatsapp: '+237600000002',
+    email: 'naomi.b@proton.me',
+    planType: PlanType.premium,
+    estVerifie: true, estDisponible: true,
+    tarif: 45000,
+    dateExpiration: DateTime.now().add(const Duration(days: 15)),
+    vues: 280,
+  ),
+  PublicationModel(
+    id: 'mock_3',
+    escortPseudo: 'Bella R.',
+    escortImageProfil: 'https://randomuser.me/api/portraits/women/33.jpg',
+    imageUrls: ['https://picsum.photos/seed/s3a/800/600'],
+    titre: 'Disponible ce soir',
+    description: 'Jeune femme dynamique, douce et attentionnée.',
+    categorie: 'Latina',
+    pays: 'Cameroun', region: 'Centre',
+    ville: 'Yaoundé', quartier: 'Nlongkak',
+    telephone: '+237600000003', whatsapp: '+237600000003',
+    planType: PlanType.standard,
+    estVerifie: true, estDisponible: true,
+    tarif: 30000,
+    dateExpiration: DateTime.now().add(const Duration(days: 5)),
+    vues: 120,
+  ),
+];
+
+// ─────────────────────────────────────────────────────────
+// LISTES FILTRE (statiques — remplacées dynamiquement par le référentiel)
+// ─────────────────────────────────────────────────────────
+const List<String> categoriesStatiques = [
+  'Toutes', 'Milf', 'BBW', 'Ebony', 'Latina', 'Asian', 'Trans', 'Couple',
+];
+
+const List<String> villesStatiques = [
+  'Toutes', 'Yaoundé', 'Douala', 'Bafoussam', 'Garoua', 'Maroua',
+];
+
+// ─────────────────────────────────────────────────────────
 // AVIS MOCK
 // ─────────────────────────────────────────────────────────
 final List<AvisModel> mockAvis = [
-  AvisModel(id: 1, publicationId: 1, note: 5, message: 'Très discrète et ponctuelle. Je recommande vivement.', createdAt: DateTime.now().subtract(const Duration(days: 3))),
-  AvisModel(id: 2, publicationId: 1, note: 4, message: 'Super expérience, cadre agréable.', createdAt: DateTime.now().subtract(const Duration(days: 7))),
-  AvisModel(id: 3, publicationId: 1, note: 3, message: 'Correct mais légèrement en retard.', createdAt: DateTime.now().subtract(const Duration(days: 14))),
-  AvisModel(id: 4, publicationId: 2, note: 5, message: 'Magnifique, très professionnelle.', createdAt: DateTime.now().subtract(const Duration(days: 2))),
-  AvisModel(id: 5, publicationId: 2, note: 4, message: 'Bonne prestation, je reviendrai.', createdAt: DateTime.now().subtract(const Duration(days: 10))),
-  AvisModel(id: 6, publicationId: 3, note: 5, message: 'Parfait, rien à redire.', createdAt: DateTime.now().subtract(const Duration(days: 1))),
-  AvisModel(id: 7, publicationId: 6, note: 4, message: 'Massage très relaxant, cadre propre.', createdAt: DateTime.now().subtract(const Duration(days: 5))),
-  AvisModel(id: 8, publicationId: 6, note: 5, message: 'Excellent rapport qualité prix.', createdAt: DateTime.now().subtract(const Duration(days: 8))),
+  AvisModel(id: '1', publicationId: 'mock_1', note: 5,
+      message: 'Très discrète et ponctuelle.',
+      createdAt: DateTime.now().subtract(const Duration(days: 3))),
+  AvisModel(id: '2', publicationId: 'mock_1', note: 4,
+      message: 'Super expérience, cadre agréable.',
+      createdAt: DateTime.now().subtract(const Duration(days: 7))),
 ];

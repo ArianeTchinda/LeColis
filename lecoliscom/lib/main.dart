@@ -2,18 +2,22 @@
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:intl/date_symbol_data_local.dart'; // ← AJOUTER
+
 import 'core/theme/app_theme.dart';
 import 'features/splash/splash_screen.dart';
 import 'features/admin/admin_login_screen.dart';
 import 'features/admin/admin_dashboard_screen.dart';
 import 'core/models/admin_models.dart';
-import 'core/models/escort_model.dart'; // SessionManager vient d'ici selon votre snippet
+import 'core/models/escort_model.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  await initializeDateFormatting('fr_FR', null); // ← AJOUTER
+
   final session = SessionManager();
-  await session.restaurer(); // recharge le profil si token présent
+  await session.restaurer();
 
   runApp(
     ChangeNotifierProvider<SessionManager>.value(
@@ -26,7 +30,6 @@ void main() async {
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  // Constante littérale — pas d'interpolation donc pas d'erreur dans switch
   static const String _adminRoute = '/lecolis-admin-2025';
 
   @override

@@ -5,13 +5,17 @@
 //  - Carousel enveloppé dans un Container arrondi avec margin top
 //  - Desktop inchangé (layout éditorial sticky)
 
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
+import '../../../../../core/constants/api_constants.dart';
 import '../../../../../core/constants/app_colors.dart';
 import '../../../../../core/models/publication_model.dart';
+import '../../../../../core/services/publication_service.dart';
 import '../widgets/publication_card.dart';
 
 // ── Breakpoints ──────────────────────────────────────────
@@ -51,13 +55,30 @@ class _PublicationDetailScreenState extends State<PublicationDetailScreen> {
   @override
   void initState() {
     super.initState();
-    _pub        = widget.publication;
+    _pub        = widget.publication; // affichage immédiat (données locales)
     _similaires = _getSimilaires();
     _pageCtrl   = PageController();
-    _avis       = mockAvis.where((a) => a.publicationId == _pub.id).toList();
+    // Avis embarqués dans la publication (retournés par le backend)
+    _avis = List.from(_pub.avis);
     _searchCtrl.addListener(() {
       _searchQuery.value = _searchCtrl.text.trim().toLowerCase();
     });
+    _chargerDetail(); // rafraîchit vues + avis en arrière-plan
+  }
+
+  // Appelle GET /publications/:id → incrémente les vues côté backend
+  // puis met à jour l'état local avec les données fraîches.
+  Future<void> _chargerDetail() async {
+    try {
+      final frais = await PublicationService.detail(_pub.id);
+      if (!mounted) return;
+      setState(() {
+        _pub  = frais;
+        _avis = List.from(frais.avis);
+      });
+    } catch (_) {
+      // Silencieux — on garde les données locales si erreur réseau
+    }
   }
 
   @override
@@ -127,23 +148,48 @@ class _PublicationDetailScreenState extends State<PublicationDetailScreen> {
     ));
   }
 
-  void _ajouterAvis(int note, String message) {
+  Future<void> _ajouterAvis(int note, String message) async {
     if (message.trim().isEmpty) return;
-    setState(() {
-      _avis.insert(0, AvisModel(
-        id:            (_avis.length + 100).toString(),
-        publicationId: _pub.id,
-        note:          note,
-        message:       message.trim(),
-        createdAt:     DateTime.now(),
-      ));
-    });
-    _snack('Votre avis a été publié');
+
+    try {
+      final res = await http.post(
+        Uri.parse(ApiConstants.publicationAvis(_pub.id)),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'note': note, 'message': message.trim()}),
+      ).timeout(const Duration(seconds: 10));
+
+      if (res.statusCode == 201) {
+        final body = jsonDecode(res.body) as Map<String, dynamic>;
+        final nouvelAvis = AvisModel.fromJson(body, _pub.id);
+        setState(() => _avis.insert(0, nouvelAvis));
+        _snack('Votre avis a été publié');
+      } else {
+        _snack('Impossible de publier l\'avis. Réessayez.');
+      }
+    } catch (_) {
+      _snack('Erreur réseau. Réessayez.');
+    }
   }
 
-  void _signalerCompte(SignalementMotif motif, String detail) {
-    // TODO: appel API signalement
-    _snack('Signalement envoyé à l\'administration');
+  Future<void> _signalerCompte(SignalementMotif motif, String detail) async {
+    try {
+      final res = await http.post(
+        Uri.parse(ApiConstants.publicationSignaler(_pub.id)),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'motif':       motif.label,
+          'description': detail.trim().isEmpty ? null : detail.trim(),
+        }),
+      ).timeout(const Duration(seconds: 10));
+
+      if (res.statusCode == 201) {
+        _snack('Signalement envoyé à l\'administration');
+      } else {
+        _snack('Impossible d\'envoyer le signalement. Réessayez.');
+      }
+    } catch (_) {
+      _snack('Erreur réseau. Réessayez.');
+    }
   }
 
   @override
@@ -229,7 +275,7 @@ class _MobileLayout extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 10, vertical: 5),
                       decoration: BoxDecoration(
-                        color:         s._pub.planType.color.withOpacity(0.88),
+                        color:         s._pub.planColor.withOpacity(0.88),
                         borderRadius:  BorderRadius.circular(20),
                       ),
                       child: Text(
@@ -354,7 +400,7 @@ class _TabletLayout extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 10, vertical: 5),
                       decoration: BoxDecoration(
-                        color:        s._pub.planType.color.withOpacity(0.88),
+                        color:        s._pub.planColor.withOpacity(0.88),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
@@ -879,7 +925,7 @@ class _EscortHeader extends StatelessWidget {
           width: 52, height: 52,
           decoration: BoxDecoration(
             shape:  BoxShape.circle,
-            border: Border.all(color: pub.planType.color, width: 2),
+            border: Border.all(color: pub.planColor, width: 2),
           ),
           child: ClipOval(
             child: Image.network(
@@ -917,8 +963,8 @@ class _EscortHeader extends StatelessWidget {
                 children: [
                   _SmallBadge(
                     label: pub.planType.label,
-                    bg:    pub.planType.bgColor,
-                    fg:    pub.planType.color,
+                    bg:    pub.planBgColor,
+                    fg:    pub.planColor,
                   ),
                   const SizedBox(width: 8),
                   _SmallBadge(
@@ -970,7 +1016,7 @@ class _InfoRow extends StatelessWidget {
           _InfoChip(
             icon:  Icons.payments_outlined,
             label: '${pub.tarif!.toStringAsFixed(0)} FCFA',
-            color: pub.planType.color,
+            color: pub.planColor,
           ),
       ],
     );

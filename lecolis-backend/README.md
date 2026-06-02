@@ -390,3 +390,22 @@ docker-compose down -v
 docker-compose up -d
 # Attendre 15s puis relancer db:push et db:seed
 ```
+
+### Accès à pgAdmin
+
+```bash
+URL : http://localhost:5050
+```
+| Champ    | Valeur              |
+| -------- | ------------------- |
+| Email    | `admin@lecolis.com` |
+| Password | `Admin@2025!`       |
+
+
+| Champ             | Valeur                                                                                                            |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Host name/address | `postgres` (si pgAdmin est dans Docker) ou `host.docker.internal` (si tu veux pointer vers PostgreSQL sur ton PC) |
+| Port              | `5432`                                                                                                            |
+| Database          | `lecolis_db`                                                                                                      |
+| Username          | `lecolis_user`                                                                                                    |
+| Password          | `lecolis_pass`                                                                                                    |

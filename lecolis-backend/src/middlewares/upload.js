@@ -33,11 +33,14 @@ function wrapMulter(multerFn) {
   return (req, res, next) => {
     multerFn(req, res, (err) => {
       if (err instanceof multer.MulterError) {
+        console.error(`[multer] Error: ${err.message}`);
         return res.status(400).json({ message: `Erreur upload : ${err.message}` });
       }
       if (err) {
+        console.error(`[multer] Error: ${err.message}`);
         return res.status(400).json({ message: err.message });
       }
+      console.log(`[multer] Success - file(s) parsed. single: ${req.file ? 'yes' : 'no'}, array: ${req.files?.length || 0}`);
       next();
     });
   };

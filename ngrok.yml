@@ -1,0 +1,12 @@
+﻿version: '2'
+
+tunnels:
+  backend:
+    addr: 3000
+    proto: http
+    host_header: localhost:3000
+
+  frontend:
+    addr: 10107
+    proto: http
+    host_header: localhost:10107

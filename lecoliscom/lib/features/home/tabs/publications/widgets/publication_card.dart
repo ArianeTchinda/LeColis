@@ -72,7 +72,7 @@ class _PublicationCardState extends State<PublicationCard> {
               boxShadow: _hovered
                   ? [
                       BoxShadow(
-                        color: pub.planType.color.withOpacity(0.35),
+                        color: pub.planColor.withOpacity(0.35),
                         blurRadius: 32,
                         spreadRadius: 2,
                         offset: const Offset(0, 12),
@@ -188,17 +188,21 @@ class _CardContent extends StatelessWidget {
             Positioned.fill(
               child: Container(
                 decoration: BoxDecoration(
-                  color: pub.planType.color.withOpacity(0.08),
+                  color: pub.planColor.withOpacity(0.08),
                   borderRadius: BorderRadius.circular(20),
                 ),
               ),
             ),
 
           // ── BADGE PLAN — haut gauche ──
-          Positioned(
-            top: 10, left: 10,
-            child: _PlanBadge(planType: pub.planType),
-          ),
+          // ── BADGE PLAN — haut gauche ──
+Positioned(
+  top: 10, left: 10,
+  child: _PlanBadge(
+    planTypeString: pub.planTypeString ?? pub.planType.toString(), // ← plus robuste
+    planColor: pub.planColor,
+  ),
+),
 
           // ── CATÉGORIE — haut droite ──
           Positioned(
@@ -280,7 +284,7 @@ class _CardContent extends StatelessWidget {
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     border: Border.all(
-                        color: pub.planType.color, width: 1.5),
+                        color: pub.planColor, width: 1.5),
                   ),
                   child: ClipOval(
                     child: Image.network(
@@ -335,7 +339,7 @@ class _CardContent extends StatelessWidget {
                     child: Text(
                       '${pub.tarif!.toStringAsFixed(0)} F',
                       style: TextStyle(
-                        color: pub.planType.color,
+                        color: pub.planColor,
                         fontSize: 10,
                         fontWeight: FontWeight.w800,
                       ),
@@ -373,39 +377,55 @@ class _CardContent extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────
-// Badge plan
+// Badge Plan amélioré (plus intelligent)
 // ─────────────────────────────────────────────────────────
 class _PlanBadge extends StatelessWidget {
-  final PlanType planType;
-  const _PlanBadge({required this.planType});
+  final String planTypeString;   // ex: "standard", "premium", "basique"
+  final Color  planColor;
+
+  const _PlanBadge({
+    required this.planTypeString,
+    required this.planColor,
+  });
+
+  String get _label {
+    final type = planTypeString.toLowerCase();
+    if (type.contains('premium')) return 'PREMIUM';
+    if (type.contains('standard')) return 'STANDARD';
+    if (type.contains('basique')) return 'BASIQUE';
+    return type.toUpperCase();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: planType.color.withOpacity(0.90),
+        color: planColor.withOpacity(0.92),
         borderRadius: BorderRadius.circular(8),
         boxShadow: [
           BoxShadow(
-            color: planType.color.withOpacity(0.4),
-            blurRadius: 8,
+            color: planColor.withOpacity(0.45),
+            blurRadius: 10,
+            spreadRadius: 1,
           ),
         ],
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (planType == PlanType.premium)
-            const Icon(Icons.star_rounded, color: Colors.white, size: 10),
-          if (planType == PlanType.premium) const SizedBox(width: 3),
+          if (planTypeString.toLowerCase().contains('premium'))
+            const Icon(Icons.workspace_premium_rounded, color: Colors.white, size: 11),
+          if (planTypeString.toLowerCase().contains('premium'))
+            const SizedBox(width: 3),
+          
           Text(
-            planType.label,
+            _label,
             style: const TextStyle(
               color: Colors.white,
               fontSize: 10,
               fontWeight: FontWeight.w800,
-              letterSpacing: 0.3,
+              letterSpacing: 0.4,
             ),
           ),
         ],

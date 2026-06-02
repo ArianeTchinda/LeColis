@@ -7,7 +7,7 @@ import '../constants/api_constants.dart';
 
 class ResetMdpService {
   // ── Étape 1 : demander le code ────────────────────────────
-  /// Renvoie true si la requête a abouti (même si email inconnu)
+  // Renvoie true si la requête a abouti (même si email inconnu)
   Future<void> demanderCode({required String email}) async {
     try {
       final response = await http.post(
@@ -31,7 +31,7 @@ class ResetMdpService {
   }
 
   // ── Étape 2 : vérifier le code ────────────────────────────
-  /// Renvoie le reinitId si le code est valide
+  // Renvoie le reinitId si le code est valide
   Future<String> verifierCode({
     required String email,
     required String code,

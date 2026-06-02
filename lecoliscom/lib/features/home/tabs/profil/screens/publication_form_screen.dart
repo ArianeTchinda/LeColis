@@ -9,16 +9,21 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
 import '../../../../../core/constants/app_colors.dart';
 import '../../../../../core/data/categories_data.dart';
-import '../../../../../core/data/location_data.dart';
+import '../../../../../core/services/referentiel_service.dart';
 import '../widgets/image_editor_screen.dart';
 import '/core/models/escort_model.dart';
+import '/core/services/profil_service.dart';
+import '/core/models/publication_model.dart';
+import '/core/models/categorie_model.dart';
 
 // ─────────────────────────────────────────────────────────
 // Résultat du formulaire — transmis au dashboard
 // ─────────────────────────────────────────────────────────
 class PublicationFormResult {
+  final String       id;
   final String       titre;
   final String       description;
   final List<String> categories;
@@ -28,10 +33,12 @@ class PublicationFormResult {
   final String       quartier;
   final double?      tarif;
   final bool         estDisponible;
-  // En prod : List<File> pour les images uploadées
-  final List<String> imageUrls; // mock : URLs vides pour l'instant
+  final List<String> imageUrls;
+  final DateTime     dateExpiration;
+  final int          vues;
 
   const PublicationFormResult({
+    required this.id,
     required this.titre,
     required this.description,
     required this.categories,
@@ -42,6 +49,8 @@ class PublicationFormResult {
     this.tarif,
     required this.estDisponible,
     required this.imageUrls,
+    required this.dateExpiration,
+    required this.vues,
   });
 }
 
@@ -49,10 +58,14 @@ class PublicationFormResult {
 // ÉCRAN PRINCIPAL
 // ─────────────────────────────────────────────────────────
 class PublicationFormScreen extends StatefulWidget {
-  /// null → création, non-null → modification
+  // null → création, non-null → modification (modèle simplifié pour la grille)
   final PublicationGestion? existing;
 
-  const PublicationFormScreen({super.key, this.existing});
+  // Modèle complet chargé depuis l'API (prioritaire sur [existing] en mode édition).
+  // Permet de pré-remplir tous les champs, y compris les images MinIO.
+  final PublicationModel? existingModel;
+
+  const PublicationFormScreen({super.key, this.existing, this.existingModel});
 
   @override
   State<PublicationFormScreen> createState() => _PublicationFormScreenState();
@@ -73,60 +86,326 @@ class _PublicationFormScreenState extends State<PublicationFormScreen> {
   // Catégories sélectionnées
   final Set<String> _categories = {};
 
+  // Catégories chargées depuis l'API (groupes nom -> list<CategorieModel>)
+  Map<String, List<CategorieModel>> _groupedCategories = {};
+  Map<String, String> _categorieIdToName = {};
+
+  // Localisation : listes chargées depuis l'API (avec id + nom)
+  List<PaysRef>     _paysList      = [];
+  List<RegionRef>   _regionsList   = [];
+  List<VilleRef>    _villesList    = [];
+  List<QuartierRef> _quartiersList = [];
+
+  // Flags : true si la valeur saisie n'existe pas encore en BD
+  bool _paysNouveau     = false;
+  bool _regionNouveau   = false;
+  bool _villeNouveau    = false;
+  bool _quartierNouveau = false;
+
   // Disponibilité
   bool _estDisponible = true;
 
-  // Images réelles — stockées en bytes après édition
-  final List<Uint8List> _imageBytesList = [];
+  bool _loading = false; // true pendant la soumission du formulaire
 
-  bool _loading = false;
+  // Images réseau déjà uploadées (MinIO) — on garde leurs URLs pour ne pas
+  // les re-uploader si elles ne sont pas modifiées.
+  // Structure : { 'url': String, 'bytes': Uint8List? }
+  // Structure de chaque entrée :
+  //   'id'       : ID Prisma (String?) — pour suppression backend
+  //   'url'      : URL proxifiée (String) — pour affichage
+  //   'bytes'    : Uint8List? — pour aperçu et éditeur
+  //   'modifiee' : bool — false = réseau intacte, true = à uploader
+  final List<Map<String, dynamic>> _imagesState = [];
 
-  bool get _estModification => widget.existing != null;
+  final List<String> _imagesToDelete = [];
+
+  bool _loadingImages = false; // true pendant le téléchargement depuis MinIO
+
+  bool get _estModification => widget.existing != null || widget.existingModel != null;
+  String get _existingId => widget.existingModel?.id ?? widget.existing?.id ?? '';
 
   @override
-  void initState() {
-    super.initState();
-    final e = widget.existing;
-    if (e != null) {
-      // Pré-remplir pour modification
-      _titreCtrl.text = e.titre;
-      _descCtrl.text  = ''; // PublicationGestion n'a pas de desc — à enrichir
+void initState() {
+  super.initState();
+
+  final model = widget.existingModel;
+  final e = widget.existing;
+
+  if (model != null) {
+  // MODE MODIFICATION - Données complètes
+  _titreCtrl.text = model.titre;
+  _descCtrl.text = model.description;
+  _tarifCtrl.text = model.tarif != null ? model.tarif!.toInt().toString() : '';
+
+  _estDisponible = model.estDisponible;
+  _pays = model.pays.isNotEmpty ? model.pays : 'Cameroun';
+  _region = model.region;
+  _ville = model.ville;
+  _quartier = model.quartier;
+
+  // === CATÉGORIES - Correction importante ===
+  if (model.categorie.isNotEmpty) {
+    _categories.add(model.categorie); // fallback sur l'ancienne logique
+  }
+
+  // Meilleure récupération depuis le tableau categories (recommandé)
+  // (À ajouter si tu veux être plus robuste dans le futur)
+  // for (var cat in model.categories ?? []) {  // si tu ajoutes ce champ dans le model
+  //   _categories.add(cat);
+  // }
+
+  // Images — on passe imageItems (id + url) pour pouvoir supprimer plus tard
+  if (model.imageItems.isNotEmpty) {
+    _loadingImages = true;
+    _prechargerImagesReseau(model.imageItems);
+  }
+}
+  else if (e != null) {
+    // MODE CRÉATION ou fallback
+    _titreCtrl.text = e.titre;
+    _descCtrl.text = '';
+    if (e.categorie.isNotEmpty) {
       _categories.add(e.categorie);
-      if (e.imageUrl != null) {
-        // En modification : l'image existante reste une URL réseau
-        // On ne la charge pas en bytes ici — géré côté API
+    }
+    _pays = 'Cameroun';
+
+    if (e.imageUrl != null && e.imageUrl!.isNotEmpty) {
+      _imagesState.add({'url': e.imageUrl!, 'bytes': null});
+    }
+  }
+
+  _loadReferentiel();
+}
+
+// Supprime une image de la liste (et la marque pour suppression côté backend plus tard)
+void _supprimerImage(int index) {
+  final entry = _imagesState[index];
+  final imageId = entry['id'] as String?;   // On aura besoin de l'ID plus tard
+
+  if (imageId != null && imageId.isNotEmpty) {
+    _imagesToDelete.add(imageId);
+  }
+
+  setState(() {
+    _imagesState.removeAt(index);
+  });
+}
+
+  // Télécharge les images depuis MinIO et les stocke en bytes.
+  // Chaque entrée contient :
+  //   'id'       : ID Prisma (pour suppression)
+  //   'url'      : URL proxifiée (pour affichage)
+  //   'bytes'    : bytes (pour aperçu et éditeur)
+  //   'modifiee' : false → image réseau intacte, ne pas re-uploader
+  //                true  → image nouvelle ou éditée, à uploader
+  Future<void> _prechargerImagesReseau(List<ImagePub> items) async {
+    final List<Map<String, dynamic>> loaded = [];
+
+    for (final item in items) {
+      try {
+        final res = await http.get(Uri.parse(item.url))
+            .timeout(const Duration(seconds: 15));
+
+        if (res.statusCode == 200) {
+          loaded.add({
+            'id':       item.id,
+            'url':      item.url,
+            'bytes':    res.bodyBytes,
+            'modifiee': false,   // ← intacte : ne sera PAS re-uploadée
+          });
+        } else {
+          loaded.add({
+            'id':       item.id,
+            'url':      item.url,
+            'bytes':    null,
+            'modifiee': false,
+          });
+        }
+      } catch (_) {
+        loaded.add({
+          'id':       item.id,
+          'url':      item.url,
+          'bytes':    null,
+          'modifiee': false,
+        });
       }
-      // Localisation non présente dans PublicationGestion → défaut
-      _pays = 'Cameroun';
     }
-    // Init région/ville/quartier sur premier disponible
-    _syncRegion();
+
+    if (mounted) {
+      setState(() {
+        _imagesState.clear();
+        _imagesState.addAll(loaded);
+        _loadingImages = false;
+      });
+    }
   }
 
-  void _syncRegion() {
-    final regions = getRegions(_pays);
-    if (regions.isNotEmpty && !regions.contains(_region)) {
-      _region = regions.first;
+  // Liste des bytes disponibles (pour l'aperçu et l'upload).
+  // Null si l'image est réseau et non modifiée.
+  List<Uint8List?> get _imagesBytesOuNull =>
+      _imagesState.map((e) => e['bytes'] as Uint8List?).toList();
+
+  Future<void> _loadReferentiel() async {
+  try {
+    // 1. Charger les catégories depuis l'API
+    final grouped = await ReferentielService.getCategoriesGrouped();
+    final map = <String, String>{};
+    grouped.forEach((g, list) {
+      for (final c in list) {
+        map[c.id] = c.nom;
+      }
+    });
+
+    setState(() {
+      _groupedCategories = grouped;
+      _categorieIdToName = map;
+    });
+
+    // 2. Pré-sélection des catégories (MULTI-CATÉGORIES)
+    if (widget.existingModel != null) {
+      final model = widget.existingModel!;
+
+      // Priorité au tableau categories (le plus complet)
+      if (model.categories.isNotEmpty) {
+        for (final catName in model.categories) {
+          if (catName.isEmpty) continue;
+
+          final entry = map.entries.firstWhere(
+            (e) => e.value.toLowerCase().trim() == catName.toLowerCase().trim(),
+            orElse: () => const MapEntry('', ''),
+          );
+
+          if (entry.key.isNotEmpty) {
+            _categories.add(entry.key);
+          }
+        }
+      } 
+      // Fallback sur l'ancienne propriété "categorie" (String)
+      else if (model.categorie.isNotEmpty) {
+        final entry = map.entries.firstWhere(
+          (e) => e.value.toLowerCase().trim() == model.categorie.toLowerCase().trim(),
+          orElse: () => const MapEntry('', ''),
+        );
+        if (entry.key.isNotEmpty) {
+          _categories.add(entry.key);
+        }
+      }
+    } 
+    // Cas fallback pour PublicationGestion (ancien modèle)
+    else if (widget.existing != null && widget.existing!.categorie.isNotEmpty) {
+      final entry = map.entries.firstWhere(
+        (e) => e.value.toLowerCase().trim() == widget.existing!.categorie.toLowerCase().trim(),
+        orElse: () => const MapEntry('', ''),
+      );
+      if (entry.key.isNotEmpty) {
+        _categories.add(entry.key);
+      }
     }
-    _syncVille();
+
+    // 3. Charger les pays
+    final paysRefs = await ProfilService.getPays();
+    setState(() => _paysList = paysRefs);
+
+    // 4. Cascade localisation pour la modification
+    if (widget.existingModel != null) {
+      final m = widget.existingModel!;
+      if (m.region.isNotEmpty) {
+        await _fetchRegionsForPaysWithValue(_pays, m.region);
+      }
+      if (m.ville.isNotEmpty) {
+        await _fetchVillesForRegionWithValue(m.region, m.ville);
+      }
+      if (m.quartier.isNotEmpty) {
+        await _fetchQuartiersForVilleWithValue(m.ville, m.quartier);
+      }
+    }
+  } catch (e) {
+    print('[PublicationForm] Erreur chargement référentiel: $e');
+  }
+}
+
+  Future<void> _fetchRegionsForPays(String pays) async {
+    try {
+      final regs = await ProfilService.getRegions(pays);
+      setState(() {
+        _regionsList = regs;
+        if (_regionsList.isNotEmpty &&
+            !_regionsList.any((r) => r.nom == _region)) {
+          _region = _regionsList.first.nom;
+          _regionNouveau = false;
+        }
+      });
+      if (_region.isNotEmpty) await _fetchVillesForRegion(_region);
+    } catch (_) {}
   }
 
-  void _syncVille() {
-    final villes = getVilles(_pays, _region);
-    if (villes.isNotEmpty && !villes.contains(_ville)) {
-      _ville = villes.first;
-    }
-    _syncQuartier();
+  Future<void> _fetchRegionsForPaysWithValue(String pays, String cibleRegion) async {
+    try {
+      final regs = await ProfilService.getRegions(pays);
+      setState(() {
+        _regionsList = regs;
+        if (regs.any((r) => r.nom == cibleRegion)) {
+          _region = cibleRegion;
+        }
+      });
+    } catch (_) {}
   }
 
-  void _syncQuartier() {
-    final quartiers = getQuartiers(_pays, _region, _ville);
-    if (quartiers.isNotEmpty && !quartiers.contains(_quartier)) {
-      _quartier = quartiers.first;
-    } else if (quartiers.isEmpty) {
-      _quartier = '';
-    }
+  Future<void> _fetchVillesForRegionWithValue(String region, String cibleVille) async {
+    try {
+      final villes = await ProfilService.getVilles(region);
+      setState(() {
+        _villesList = villes;
+        if (villes.any((v) => v.nom == cibleVille)) {
+          _ville = cibleVille;
+        }
+      });
+    } catch (_) {}
   }
+
+  Future<void> _fetchQuartiersForVilleWithValue(String ville, String cibleQuartier) async {
+    try {
+      final quartiers = await ProfilService.getQuartiers(ville);
+      setState(() {
+        _quartiersList = quartiers;
+        if (quartiers.any((q) => q.nom == cibleQuartier)) {
+          _quartier = cibleQuartier;
+        }
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _fetchVillesForRegion(String region) async {
+    try {
+      final villes = await ProfilService.getVilles(region);
+      setState(() {
+        _villesList = villes;
+        if (_villesList.isNotEmpty &&
+            !_villesList.any((v) => v.nom == _ville)) {
+          _ville = _villesList.first.nom;
+          _villeNouveau = false;
+        }
+      });
+      if (_ville.isNotEmpty) await _fetchQuartiersForVille(_ville);
+    } catch (_) {}
+  }
+
+  Future<void> _fetchQuartiersForVille(String ville) async {
+    try {
+      final quartiers = await ProfilService.getQuartiers(ville);
+      setState(() {
+        _quartiersList = quartiers;
+        if (_quartiersList.isNotEmpty &&
+            !_quartiersList.any((q) => q.nom == _quartier)) {
+          _quartier = _quartiersList.first.nom;
+          _quartierNouveau = false;
+        }
+      });
+    } catch (_) {}
+  }
+
+  // _sync* supprimées : la cascade est gérée par _fetchRegionsForPays,
+  // _fetchVillesForRegion, _fetchQuartiersForVille (données API).
 
   @override
   void dispose() {
@@ -136,59 +415,173 @@ class _PublicationFormScreenState extends State<PublicationFormScreen> {
     super.dispose();
   }
 
-   // ── Validation et envoi ───────────────────────────────
-
   void _submit() {
-    if (!_formKey.currentState!.validate()) return;
+  if (!_formKey.currentState!.validate()) return;
 
-    if (_categories.isEmpty) {
-      _showError('Sélectionnez au moins une catégorie.');
+  if (_categories.isEmpty) {
+    _showError('Sélectionnez au moins une catégorie.');
+    return;
+  }
+
+  if (_pays.trim().isEmpty) {
+    _showError('Renseignez un pays.');
+    return;
+  }
+
+  if (_ville.trim().isEmpty) {
+    _showError('Renseignez une ville.');
+    return;
+  }
+
+  if (_imagesState.isEmpty && !_estModification) {
+    _showError('Ajoutez au moins une photo pour la publication.');
+    return;
+  }
+
+  setState(() => _loading = true);
+
+  (() async {
+    if (!mounted) return;
+    final token = SessionManager().accessToken;
+    if (token == null) {
+      _showError('Utilisateur non authentifié.');
+      setState(() => _loading = false);
       return;
     }
 
-    if (_ville.isEmpty) {
-      _showError('Choisissez une ville.');
-      return;
-    }
+    try {
+      print('📤 Catégories envoyées (IDs): ${_categories.toList()}');
 
-    // Optionnel mais recommandé
-    if (_imageBytesList.isEmpty && !_estModification) {
-      _showError('Ajoutez au moins une photo pour la publication.');
-      return;
-    }
+      String paysNomFinal     = _pays.trim();
+      String regionNomFinal   = _region.trim();
+      String villeNomFinal    = _ville.trim();
+      String quartierNomFinal = _quartier.trim();
+      String? quartierIdFinal;
 
-    setState(() => _loading = true);
+      // Upsert localisation si nécessaire
+      if (_paysNouveau && paysNomFinal.isNotEmpty) {
+        await ProfilServiceUpsert.upsertPays(token, nom: paysNomFinal);
+      }
+      if (_regionNouveau && regionNomFinal.isNotEmpty) {
+        await ProfilServiceUpsert.upsertRegion(
+          token, nom: regionNomFinal, paysNom: paysNomFinal,
+        );
+      }
+      if (_villeNouveau && villeNomFinal.isNotEmpty) {
+        await ProfilServiceUpsert.upsertVille(
+          token,
+          nom: villeNomFinal,
+          regionNom: regionNomFinal,
+          paysNom: paysNomFinal,
+        );
+      }
+      if (quartierNomFinal.isNotEmpty) {
+        final qRef = await ProfilServiceUpsert.upsertQuartier(
+          token,
+          nom: quartierNomFinal,
+          villeNom: villeNomFinal,
+          regionNom: regionNomFinal,
+          paysNom: paysNomFinal,
+        );
+        quartierIdFinal = qRef.id;
+      }
 
-    // Simule un délai API
-    Future.delayed(const Duration(milliseconds: 800), () {
+      final svc = ProfilService(token);
+      final tarifVal = double.tryParse(
+          _tarifCtrl.text.replaceAll(RegExp(r'[^0-9.]'), ''));
+
+      PublicationModel pub;
+
+      // Images à uploader : uniquement celles marquées 'modifiee': true
+      // Les images réseau intactes ('modifiee': false) ne sont PAS re-uploadées
+      final newImages = _imagesState
+          .where((e) => e['modifiee'] == true && e['bytes'] != null)
+          .map((e) => e['bytes'] as Uint8List)
+          .toList();
+
+      if (_estModification) {
+        // ── Détection "rien n'a changé" ──────────────────────────
+        // On bloque seulement si AUCUNE des conditions suivantes n'est vraie :
+        // - images supprimées
+        // - nouvelles images / images éditées
+        // On laisse toujours passer les changements de texte/catégorie/localisation
+        // car ils sont difficiles à comparer proprement (et peu coûteux).
+        // Le seul cas vraiment problématique était la duplication d'images.
+        // ─────────────────────────────────────────────────────────
+
+        print('🔄 Modification de la publication ID: $_existingId');
+        print('   → images à uploader : ${newImages.length}');
+        print('   → images à supprimer : ${_imagesToDelete.length}');
+
+        pub = await svc.modifierPublication(
+          _existingId,
+          titre:          _titreCtrl.text.trim(),
+          description:    _descCtrl.text.trim(),
+          estDisponible:  _estDisponible,
+          tarif:          tarifVal,
+          quartierId:     quartierIdFinal,
+          villeNom:       villeNomFinal,
+          regionNom:      regionNomFinal,
+          paysNom:        paysNomFinal,
+          categorieIds:   _categories.toList(),
+          imagesToDelete: _imagesToDelete,
+        );
+
+        // Upload uniquement des images nouvelles ou éditées
+        if (newImages.isNotEmpty) {
+          pub = await svc.ajouterImages(pub.id, newImages);
+        }
+      } else {
+        print('➕ Création d\'une nouvelle publication');
+
+        pub = await svc.creerPublication(
+          titre:         _titreCtrl.text.trim(),
+          description:   _descCtrl.text.trim(),
+          estDisponible: _estDisponible,
+          tarif:         tarifVal,
+          quartierId:    quartierIdFinal,
+          villeNom:      villeNomFinal,
+          regionNom:     regionNomFinal,
+          paysNom:       paysNomFinal,
+          categorieIds:  _categories.toList(),
+        );
+
+        if (newImages.isNotEmpty) {
+          pub = await svc.ajouterImages(pub.id, newImages);
+        }
+      }
+
       if (!mounted) return;
 
-      // Création d'URLs mock à partir des images en bytes
-      final List<String> mockImageUrls = _imageBytesList.isNotEmpty
-          ? List.generate(
-              _imageBytesList.length,
-              (index) => 'image_${DateTime.now().millisecondsSinceEpoch}_$index.jpg')
-          : (widget.existing?.imageUrl != null 
-              ? [widget.existing!.imageUrl!] 
-              : <String>[]);
-
       final result = PublicationFormResult(
-        titre:         _titreCtrl.text.trim(),
-        description:   _descCtrl.text.trim(),
-        categories:    _categories.toList(),
-        pays:          _pays,
-        region:        _region,
-        ville:         _ville,
-        quartier:      _quartier,
-        tarif:         double.tryParse(
-                       _tarifCtrl.text.replaceAll(RegExp(r'[^0-9.]'), '')),
-        estDisponible: _estDisponible,
-        imageUrls:     mockImageUrls,          // ← Correction principale
+        id:             pub.id,
+        titre:          pub.titre,
+        description:    pub.description,
+        categories:     pub.categories.isNotEmpty ? pub.categories : [pub.categorie],
+        pays:           pub.pays,
+        region:         pub.region,
+        ville:          pub.ville,
+        quartier:       pub.quartier,
+        tarif:          pub.tarif,
+        estDisponible:  pub.estDisponible,
+        imageUrls:      pub.imageUrls,
+        dateExpiration: pub.dateExpiration,
+        vues:           pub.vues,
       );
 
       Navigator.pop(context, result);
-    });
-  }
+      
+      // Message de succès
+      _scaffoldSuccess('Publication mise à jour avec succès !');
+
+    } catch (e) {
+      print('❌ Erreur lors de la soumission: $e');
+      _showError(e.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  })();
+}
 
   void _showError(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -203,6 +596,19 @@ class _PublicationFormScreenState extends State<PublicationFormScreen> {
       ),
     );
   }
+
+  void _scaffoldSuccess(String msg) {
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(msg, style: const TextStyle(color: Colors.white)),
+      backgroundColor: Colors.green,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      margin: const EdgeInsets.all(16),
+      duration: const Duration(seconds: 2),
+    ),
+  );
+}
 
   // ── Build ─────────────────────────────────────────────
 
@@ -291,10 +697,11 @@ class _PublicationFormScreenState extends State<PublicationFormScreen> {
           width: 260,
           child: Column(children: [
             _ImagesSection(
-              imageBytesList: _imageBytesList,
+              imagesState:    _imagesState,
+              loadingImages:  _loadingImages,
               onAddImage:     _ajouterImage,
               onEditImage:    _modifierImage,
-              onRemove:       (i) => setState(() => _imageBytesList.removeAt(i)),
+              onRemove:       _supprimerImage,
             ),
             const SizedBox(height: 16),
             _DisponibiliteToggle(
@@ -322,10 +729,11 @@ class _PublicationFormScreenState extends State<PublicationFormScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _ImagesSection(
-          imageBytesList: _imageBytesList,
+          imagesState:    _imagesState,
+          loadingImages:  _loadingImages,
           onAddImage:     _ajouterImage,
           onEditImage:    _modifierImage,
-          onRemove:       (i) => setState(() => _imageBytesList.removeAt(i)),
+          onRemove:       _supprimerImage,
         ),
         const SizedBox(height: 16),
         ..._buildFormFields(),
@@ -383,11 +791,13 @@ class _PublicationFormScreenState extends State<PublicationFormScreen> {
       const SizedBox(height: 10),
       _CategoriesSelector(
         selected:  _categories,
-        onToggle:  (cat) => setState(() {
-          if (_categories.contains(cat)) {
-            _categories.remove(cat);
+        groupedCategories: _groupedCategories,
+        categorieIdToName: _categorieIdToName,
+        onToggle:  (catId) => setState(() {
+          if (_categories.contains(catId)) {
+            _categories.remove(catId);
           } else {
-            _categories.add(cat);
+            _categories.add(catId);
           }
         }),
       ),
@@ -396,16 +806,58 @@ class _PublicationFormScreenState extends State<PublicationFormScreen> {
 
       // Localisation
       _SectionLabel('Localisation'),
+      const SizedBox(height: 4),
+      const Text(
+        'Saisissez votre localisation. Si elle n\'existe pas encore, elle sera créée automatiquement.',
+        style: TextStyle(fontSize: 11, color: AppColors.textMuted),
+      ),
       const SizedBox(height: 8),
-      _LocalisationSelector(
-        pays:      _pays,
-        region:    _region,
-        ville:     _ville,
-        quartier:  _quartier,
-        onPays:    (v) => setState(() { _pays = v; _syncRegion(); }),
-        onRegion:  (v) => setState(() { _region = v; _syncVille(); }),
-        onVille:   (v) => setState(() { _ville = v; _syncQuartier(); }),
-        onQuartier: (v) => setState(() => _quartier = v),
+      _LocalisationAutocomplete(
+        pays:          _pays,
+        region:        _region,
+        ville:         _ville,
+        quartier:      _quartier,
+        paysList:      _paysList.map((p) => p.nom).toList(),
+        regionsList:   _regionsList.map((r) => r.nom).toList(),
+        villesList:    _villesList.map((v) => v.nom).toList(),
+        quartiersList: _quartiersList.map((q) => q.nom).toList(),
+        onPays: (v, estNouveau) {
+          setState(() {
+            _pays         = v;
+            _paysNouveau  = estNouveau;
+            _region       = '';   _regionNouveau   = false;
+            _ville        = '';   _villeNouveau    = false;
+            _quartier     = '';   _quartierNouveau = false;
+            _regionsList  = [];
+            _villesList   = [];
+            _quartiersList = [];
+          });
+          if (!estNouveau) _fetchRegionsForPays(v);
+        },
+        onRegion: (v, estNouveau) {
+          setState(() {
+            _region        = v;
+            _regionNouveau = estNouveau;
+            _ville         = '';  _villeNouveau    = false;
+            _quartier      = '';  _quartierNouveau = false;
+            _villesList    = [];
+            _quartiersList = [];
+          });
+          if (!estNouveau) _fetchVillesForRegion(v);
+        },
+        onVille: (v, estNouveau) {
+          setState(() {
+            _ville         = v;
+            _villeNouveau  = estNouveau;
+            _quartier      = '';  _quartierNouveau = false;
+            _quartiersList = [];
+          });
+          if (!estNouveau) _fetchQuartiersForVille(v);
+        },
+        onQuartier: (v, estNouveau) => setState(() {
+          _quartier        = v;
+          _quartierNouveau = estNouveau;
+        }),
       ),
 
       const SizedBox(height: 18),
@@ -422,38 +874,76 @@ class _PublicationFormScreenState extends State<PublicationFormScreen> {
   }
 
   Future<void> _ajouterImage() async {
-    if (_imageBytesList.length >= 6) {
+    if (_imagesState.length >= 6) {
       _showError('Maximum 6 images par publication.');
       return;
     }
     final bytes = await ouvrirEditeurImage(context);
     if (bytes != null) {
-      setState(() => _imageBytesList.add(bytes));
+      setState(() => _imagesState.add({
+        'id':       '',     // pas encore d'ID (nouvelle image)
+        'url':      '',
+        'bytes':    bytes,
+        'modifiee': true,   // ← nouvelle image : à uploader
+      }));
     }
   }
 
   Future<void> _modifierImage(int index) async {
-    final bytes = await ouvrirEditeurImage(
-      context,
-      imageInitiale: _imageBytesList[index],
-    );
-    if (bytes != null) {
-      setState(() => _imageBytesList[index] = bytes);
+  final entry = _imagesState[index];
+  final String url = entry['url'] as String? ?? '';
+  final Uint8List? currentBytes = entry['bytes'] as Uint8List?;
+
+  Uint8List? imageInitiale = currentBytes;
+
+  // Si c'est une image existante (venue de MinIO) et qu'on n'a pas encore les bytes
+  if (imageInitiale == null && url.isNotEmpty) {
+    try {
+      print('📥 Téléchargement de l\'image existante pour édition...');
+      final res = await http.get(Uri.parse(url))
+          .timeout(const Duration(seconds: 15));
+
+      if (res.statusCode == 200) {
+        imageInitiale = res.bodyBytes;
+      }
+    } catch (e) {
+      print('⚠️ Impossible de télécharger l\'image pour édition: $e');
     }
   }
+
+  // Ouvrir l'éditeur avec l'image actuelle
+  final bytes = await ouvrirEditeurImage(
+    context, 
+    imageInitiale: imageInitiale
+  );
+
+  if (bytes != null) {
+    setState(() {
+      _imagesState[index] = {
+        'id':       entry['id'] ?? '',   // on garde l'ID pour pouvoir supprimer l'ancienne dans MinIO
+        'url':      url,                 // on garde l'URL de l'originale
+        'bytes':    bytes,               // nouvelle version éditée
+        'modifiee': true,                // ← éditée : à re-uploader
+      };
+    });
+  }
+}
 }
 
 // ═══════════════════════════════════════════════════════
 // SECTION IMAGES
 // ═══════════════════════════════════════════════════════
 class _ImagesSection extends StatelessWidget {
-  final List<Uint8List> imageBytesList;
+  // Liste d'états images : {'url': String, 'bytes': Uint8List?, 'id': String?}
+  final List<Map<String, dynamic>> imagesState;
+  final bool loadingImages;
   final VoidCallback onAddImage;
   final void Function(int) onEditImage;
   final void Function(int) onRemove;
 
   const _ImagesSection({
-    required this.imageBytesList,
+    required this.imagesState,
+    required this.loadingImages,
     required this.onAddImage,
     required this.onEditImage,
     required this.onRemove,
@@ -472,6 +962,22 @@ class _ImagesSection extends StatelessWidget {
         ),
         const SizedBox(height: 12),
 
+        if (loadingImages)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Row(children: const [
+              SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: AppColors.primaryPink),
+              ),
+              SizedBox(width: 8),
+              Text('Chargement des photos…',
+                  style: TextStyle(fontSize: 11, color: AppColors.textMuted)),
+            ]),
+          ),
+
         GridView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
@@ -481,10 +987,10 @@ class _ImagesSection extends StatelessWidget {
             mainAxisSpacing: 8,
             childAspectRatio: 0.75,
           ),
-          itemCount: imageBytesList.length + (imageBytesList.length < 6 ? 1 : 0),
+          itemCount: imagesState.length + (imagesState.length < 6 ? 1 : 0),
           itemBuilder: (_, i) {
             // Bouton "Ajouter"
-            if (i == imageBytesList.length) {
+            if (i == imagesState.length) {
               return GestureDetector(
                 onTap: onAddImage,
                 child: Container(
@@ -492,8 +998,7 @@ class _ImagesSection extends StatelessWidget {
                     color: AppColors.surface,
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                      color: AppColors.primaryPink.withOpacity(0.35),
-                    ),
+                        color: AppColors.primaryPink.withOpacity(0.35)),
                   ),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -513,19 +1018,46 @@ class _ImagesSection extends StatelessWidget {
             }
 
             // Image existante
+            final entry = imagesState[i];
+            final bytes = entry['bytes'] as Uint8List?;
+            final url = entry['url'] as String? ?? '';
+
+            // Widget image
+            Widget imageWidget;
+            if (bytes != null) {
+              imageWidget = Image.memory(
+                bytes,
+                fit: BoxFit.cover,
+                width: double.infinity,
+                height: double.infinity,
+              );
+            } else if (url.isNotEmpty) {
+              imageWidget = Image.network(
+                url,
+                fit: BoxFit.cover,
+                width: double.infinity,
+                height: double.infinity,
+                loadingBuilder: (context, child, progress) =>
+                    progress == null
+                        ? child
+                        : const Center(child: CircularProgressIndicator()),
+                errorBuilder: (_, __, ___) => const Icon(
+                    Icons.broken_image,
+                    size: 40,
+                    color: Colors.grey),
+              );
+            } else {
+              imageWidget = const Center(child: CircularProgressIndicator());
+            }
+
             return Stack(
               children: [
-                // Image cliquable pour modification
+                // Image cliquable
                 GestureDetector(
                   onTap: () => onEditImage(i),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(12),
-                    child: Image.memory(
-                      imageBytesList[i],
-                      fit: BoxFit.cover,
-                      width: double.infinity,
-                      height: double.infinity,
-                    ),
+                    child: imageWidget,
                   ),
                 ),
 
@@ -573,7 +1105,7 @@ class _ImagesSection extends StatelessWidget {
                   ),
                 ),
 
-                // Bouton Supprimer ← Corrigé ici
+                // Bouton Supprimer
                 Positioned(
                   top: 6,
                   right: 6,
@@ -602,15 +1134,20 @@ class _ImagesSection extends StatelessWidget {
   }
 }
 
+
 // ═══════════════════════════════════════════════════════
 // SÉLECTEUR DE CATÉGORIES (par groupes, expansible)
 // ═══════════════════════════════════════════════════════
 class _CategoriesSelector extends StatefulWidget {
-  final Set<String>          selected;
-  final void Function(String) onToggle;
+  final Set<String>                    selected;
+  final Map<String, List<CategorieModel>> groupedCategories;
+  final Map<String, String>            categorieIdToName;
+  final void Function(String)          onToggle;
 
   const _CategoriesSelector({
     required this.selected,
+    required this.groupedCategories,
+    required this.categorieIdToName,
     required this.onToggle,
   });
 
@@ -624,11 +1161,11 @@ class _CategoriesSelectorState extends State<_CategoriesSelector> {
   @override
   Widget build(BuildContext context) {
     return Column(
-      children: categoriesParGroupe.map((groupe) {
-        final isExpanded = _expandedGroups.contains(groupe.nom);
-        final selectedInGroup = groupe.categories
-            .where((c) => widget.selected.contains(c))
-            .length;
+      children: widget.groupedCategories.entries.map((entry) {
+        final groupeNom = entry.key;
+        final cats = entry.value;
+        final isExpanded = _expandedGroups.contains(groupeNom);
+        final selectedInGroup = cats.where((c) => widget.selected.contains(c.id)).length;
 
         return Container(
           margin: const EdgeInsets.only(bottom: 8),
@@ -646,16 +1183,16 @@ class _CategoriesSelectorState extends State<_CategoriesSelector> {
             GestureDetector(
               onTap: () => setState(() {
                 if (isExpanded) {
-                  _expandedGroups.remove(groupe.nom);
+                  _expandedGroups.remove(groupeNom);
                 } else {
-                  _expandedGroups.add(groupe.nom);
+                  _expandedGroups.add(groupeNom);
                 }
               }),
               child: Container(
                 padding: const EdgeInsets.symmetric(
                     horizontal: 14, vertical: 11),
                 child: Row(children: [
-                  Text(groupe.nom,
+                    Text(groupeNom,
                       style: TextStyle(
                           fontSize:   13,
                           fontWeight: FontWeight.w600,
@@ -689,7 +1226,6 @@ class _CategoriesSelectorState extends State<_CategoriesSelector> {
                 ]),
               ),
             ),
-
             // Chips catégories
             if (isExpanded) ...[
               const Divider(
@@ -700,10 +1236,10 @@ class _CategoriesSelectorState extends State<_CategoriesSelector> {
                 child: Wrap(
                   spacing:     8,
                   runSpacing:  8,
-                  children: groupe.categories.map((cat) {
-                    final sel = widget.selected.contains(cat);
+                  children: cats.map((cat) {
+                    final sel = widget.selected.contains(cat.id);
                     return GestureDetector(
-                      onTap: () => widget.onToggle(cat),
+                      onTap: () => widget.onToggle(cat.id),
                       child: AnimatedContainer(
                         duration: const Duration(milliseconds: 150),
                         padding: const EdgeInsets.symmetric(
@@ -720,7 +1256,7 @@ class _CategoriesSelectorState extends State<_CategoriesSelector> {
                             width: sel ? 1.5 : 1,
                           ),
                         ),
-                        child: Text(cat,
+                        child: Text(cat.nom,
                             style: TextStyle(
                                 fontSize:   12,
                                 fontWeight: sel
@@ -743,30 +1279,61 @@ class _CategoriesSelectorState extends State<_CategoriesSelector> {
 }
 
 // ═══════════════════════════════════════════════════════
-// SÉLECTEUR DE LOCALISATION HIÉRARCHIQUE
+// SÉLECTEUR DE LOCALISATION — bottom sheet + ajout inline
 // ═══════════════════════════════════════════════════════
-class _LocalisationSelector extends StatelessWidget {
-  final String  pays, region, ville, quartier;
-  final void Function(String) onPays, onRegion, onVille, onQuartier;
+// Chaque niveau (pays → région → ville → quartier) :
+//   • Affiche la valeur sélectionnée dans un champ tappable
+//   • Ouvre un bottom sheet avec liste filtrée + barre de recherche
+//   • Si la recherche ne trouve rien → bouton "+ Créer"
+//   • Cascade automatique : changer pays vide région/ville/quartier
+// ─────────────────────────────────────────────────────────
+class _LocalisationAutocomplete extends StatelessWidget {
+  final String pays, region, ville, quartier;
+  final List<String> paysList, regionsList, villesList, quartiersList;
+  // callback(valeur, estNouveau)
+  final void Function(String, bool) onPays, onRegion, onVille, onQuartier;
 
-  const _LocalisationSelector({
+  const _LocalisationAutocomplete({
     required this.pays,
     required this.region,
     required this.ville,
     required this.quartier,
+    required this.paysList,
+    required this.regionsList,
+    required this.villesList,
+    required this.quartiersList,
     required this.onPays,
     required this.onRegion,
     required this.onVille,
     required this.onQuartier,
   });
 
+  Future<void> _ouvrir(
+    BuildContext context, {
+    required String label,
+    required List<String> options,
+    required String valeurActuelle,
+    required void Function(String, bool) onSelect,
+    required bool enabled,
+  }) async {
+    if (!enabled) return;
+    final choix = await showModalBottomSheet<_LocalisationChoix>(
+      context:            context,
+      isScrollControlled: true,
+      backgroundColor:    Colors.transparent,
+      builder: (_) => _LocalisationSheet(
+        label:         label,
+        options:       options,
+        valeurActuelle: valeurActuelle,
+      ),
+    );
+    if (choix != null) {
+      onSelect(choix.valeur, choix.estNouveau);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final paysList     = getPays();
-    final regionsList  = getRegions(pays);
-    final villesList   = getVilles(pays, region);
-    final quartierList = getQuartiers(pays, region, ville);
-
     return Container(
       padding:    const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -775,123 +1342,429 @@ class _LocalisationSelector extends StatelessWidget {
         border:       Border.all(color: AppColors.divider),
       ),
       child: Column(children: [
-        // Pays + Région
+        // Ligne 1 : Pays + Région
         Row(children: [
-          Expanded(child: _LocDropdown(
-            label:    'Pays',
-            value:    pays,
-            items:    paysList,
-            onChanged: onPays,
+          Expanded(child: _LocalisationField(
+            label:         'Pays',
+            valeur:        pays,
+            estNouveau:    pays.isNotEmpty && !paysList.contains(pays),
+            enabled:       true,
+            hint:          'Sélectionner…',
+            onTap: () => _ouvrir(context,
+              label:         'Pays',
+              options:       paysList,
+              valeurActuelle: pays,
+              onSelect:      onPays,
+              enabled:       true,
+            ),
           )),
           const SizedBox(width: 10),
-          Expanded(child: _LocDropdown(
-            label:    'Région',
-            value:    regionsList.contains(region) ? region : null,
-            items:    regionsList,
-            onChanged: onRegion,
+          Expanded(child: _LocalisationField(
+            label:         'Région',
+            valeur:        region,
+            estNouveau:    region.isNotEmpty && !regionsList.contains(region),
+            enabled:       pays.isNotEmpty,
+            hint:          pays.isEmpty ? '— d\'abord un pays' : 'Sélectionner…',
+            onTap: () => _ouvrir(context,
+              label:         'Région',
+              options:       regionsList,
+              valeurActuelle: region,
+              onSelect:      onRegion,
+              enabled:       pays.isNotEmpty,
+            ),
           )),
         ]),
         const SizedBox(height: 10),
-        // Ville + Quartier
+        // Ligne 2 : Ville + Quartier
         Row(children: [
-          Expanded(child: _LocDropdown(
-            label:    'Ville',
-            value:    villesList.contains(ville) ? ville : null,
-            items:    villesList,
-            onChanged: onVille,
+          Expanded(child: _LocalisationField(
+            label:         'Ville',
+            valeur:        ville,
+            estNouveau:    ville.isNotEmpty && !villesList.contains(ville),
+            enabled:       region.isNotEmpty,
+            hint:          region.isEmpty ? '— d\'abord une région' : 'Sélectionner…',
+            onTap: () => _ouvrir(context,
+              label:         'Ville',
+              options:       villesList,
+              valeurActuelle: ville,
+              onSelect:      onVille,
+              enabled:       region.isNotEmpty,
+            ),
           )),
           const SizedBox(width: 10),
-          Expanded(child: quartierList.isEmpty
-              ? _LocDropdown(
-                  label:    'Quartier',
-                  value:    null,
-                  items:    const [],
-                  onChanged: (_) {},
-                  disabled: true,
-                )
-              : _LocDropdown(
-                  label:    'Quartier',
-                  value:    quartierList.contains(quartier) ? quartier : null,
-                  items:    quartierList,
-                  onChanged: onQuartier,
-                )),
+          Expanded(child: _LocalisationField(
+            label:         'Quartier (opt.)',
+            valeur:        quartier,
+            estNouveau:    quartier.isNotEmpty && !quartiersList.contains(quartier),
+            enabled:       ville.isNotEmpty,
+            hint:          ville.isEmpty ? '— d\'abord une ville' : 'Optionnel',
+            onTap: () => _ouvrir(context,
+              label:         'Quartier',
+              options:       quartiersList,
+              valeurActuelle: quartier,
+              onSelect:      onQuartier,
+              enabled:       ville.isNotEmpty,
+            ),
+          )),
         ]),
       ]),
     );
   }
 }
 
-class _LocDropdown extends StatelessWidget {
-  final String       label;
-  final String?      value;
-  final List<String> items;
-  final void Function(String) onChanged;
-  final bool         disabled;
+// ─────────────────────────────────────────────────────────
+// Champ tappable affichant la valeur sélectionnée
+// ─────────────────────────────────────────────────────────
+class _LocalisationField extends StatelessWidget {
+  final String      label;
+  final String      valeur;
+  final bool        estNouveau;
+  final bool        enabled;
+  final String      hint;
+  final VoidCallback onTap;
 
-  const _LocDropdown({
+  const _LocalisationField({
     required this.label,
-    required this.value,
-    required this.items,
-    required this.onChanged,
-    this.disabled = false,
+    required this.valeur,
+    required this.estNouveau,
+    required this.enabled,
+    required this.hint,
+    required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
+    final hasValue = valeur.isNotEmpty;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label,
-            style: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w500,
-                color: AppColors.textSecondary)),
+        Text(label, style: const TextStyle(
+          fontSize: 11, fontWeight: FontWeight.w500,
+          color: AppColors.textSecondary,
+        )),
         const SizedBox(height: 5),
-        DropdownButtonFormField<String>(
-          value:        items.contains(value) ? value : null,
-          onChanged:    disabled || items.isEmpty
-              ? null
-              : (v) { if (v != null) onChanged(v); },
-          dropdownColor: AppColors.surface,
-          isExpanded:    true,
-          icon:          const Icon(Icons.keyboard_arrow_down_rounded,
-              size: 18, color: AppColors.textMuted),
-          style: const TextStyle(
-              color: AppColors.textPrimary, fontSize: 13),
-          hint: Text(
-            disabled ? '—' : (items.isEmpty ? 'N/A' : 'Choisir'),
-            style: const TextStyle(
-                color: AppColors.textMuted, fontSize: 12)),
-          decoration: InputDecoration(
-            filled:         true,
-            fillColor:      disabled
-                ? AppColors.surfaceElevated.withOpacity(0.5)
-                : AppColors.surfaceElevated,
-            contentPadding: const EdgeInsets.symmetric(
-                horizontal: 12, vertical: 10),
-            border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(color: AppColors.divider)),
-            enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(color: AppColors.divider)),
-            focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(
-                    color: AppColors.primaryPink, width: 1.5)),
+        GestureDetector(
+          onTap: enabled ? onTap : null,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: enabled
+                  ? AppColors.surfaceElevated
+                  : AppColors.surfaceElevated.withOpacity(0.5),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: estNouveau
+                    ? AppColors.primaryPink.withOpacity(0.5)
+                    : AppColors.divider,
+                width: estNouveau ? 1.5 : 1,
+              ),
+            ),
+            child: Row(children: [
+              Expanded(
+                child: Text(
+                  hasValue ? valeur : hint,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: hasValue
+                        ? (estNouveau
+                            ? AppColors.primaryPink
+                            : AppColors.textPrimary)
+                        : AppColors.textMuted,
+                    fontWeight: hasValue ? FontWeight.w500 : FontWeight.w400,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (estNouveau) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: AppColors.primaryPink.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: AppColors.primaryPink.withOpacity(0.4)),
+                  ),
+                  child: const Text('Nouveau', style: TextStyle(
+                    fontSize: 9, fontWeight: FontWeight.w700,
+                    color: AppColors.primaryPink,
+                  )),
+                ),
+              ] else ...[
+                const SizedBox(width: 6),
+                Icon(
+                  enabled ? Icons.expand_more_rounded : Icons.lock_outline_rounded,
+                  size: 16,
+                  color: AppColors.textMuted,
+                ),
+              ],
+            ]),
           ),
-          items: items.map((i) => DropdownMenuItem(
-            value: i,
-            child: Text(i,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                    color: AppColors.textPrimary, fontSize: 13)),
-          )).toList(),
         ),
       ],
     );
   }
 }
+
+// ─────────────────────────────────────────────────────────
+// Résultat renvoyé par le bottom sheet
+// ─────────────────────────────────────────────────────────
+class _LocalisationChoix {
+  final String valeur;
+  final bool   estNouveau;
+  const _LocalisationChoix(this.valeur, {required this.estNouveau});
+}
+
+// ─────────────────────────────────────────────────────────
+// Bottom sheet : liste filtrée + barre de recherche + "+ Créer"
+// ─────────────────────────────────────────────────────────
+class _LocalisationSheet extends StatefulWidget {
+  final String       label;
+  final List<String> options;
+  final String       valeurActuelle;
+
+  const _LocalisationSheet({
+    required this.label,
+    required this.options,
+    required this.valeurActuelle,
+  });
+
+  @override
+  State<_LocalisationSheet> createState() => _LocalisationSheetState();
+}
+
+class _LocalisationSheetState extends State<_LocalisationSheet> {
+  final _searchCtrl = TextEditingController();
+  List<String> _filtered = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _filtered = List.from(widget.options);
+    _searchCtrl.addListener(_onSearch);
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  String _norm(String s) {
+    const acc = {
+      'à':'a','â':'a','ä':'a','é':'e','è':'e','ê':'e','ë':'e',
+      'î':'i','ï':'i','ô':'o','ö':'o','ù':'u','û':'u','ü':'u','ç':'c',
+      'À':'a','Â':'a','Ä':'a','É':'e','È':'e','Ê':'e','Ë':'e',
+      'Î':'i','Ï':'i','Ô':'o','Ö':'o','Ù':'u','Û':'u','Ü':'u','Ç':'c',
+    };
+    return s.trim().toLowerCase().splitMapJoin(
+      RegExp('.'),
+      onMatch:    (m) => acc[m.group(0)] ?? m.group(0)!,
+      onNonMatch: (n) => n,
+    );
+  }
+
+  void _onSearch() {
+    final q = _searchCtrl.text.trim();
+    if (q.isEmpty) {
+      setState(() => _filtered = List.from(widget.options));
+      return;
+    }
+    final nq = _norm(q);
+    final exact    = <String>[];
+    final debut    = <String>[];
+    final contient = <String>[];
+    for (final o in widget.options) {
+      final no = _norm(o);
+      if (no == nq)              exact.add(o);
+      else if (no.startsWith(nq)) debut.add(o);
+      else if (no.contains(nq))   contient.add(o);
+    }
+    setState(() => _filtered = [...exact, ...debut, ...contient]);
+  }
+
+  bool get _saisieEstNouveau {
+    final q = _searchCtrl.text.trim();
+    if (q.isEmpty) return false;
+    final nq = _norm(q);
+    return !widget.options.any((o) => _norm(o) == nq);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final saisie = _searchCtrl.text.trim();
+
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.72,
+      decoration: const BoxDecoration(
+        color:        AppColors.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: Column(children: [
+        // Poignée
+        Container(
+          margin: const EdgeInsets.only(top: 12, bottom: 6),
+          width: 36, height: 4,
+          decoration: BoxDecoration(
+            color: AppColors.divider,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        // Titre
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+          child: Row(children: [
+            Text(
+              'Choisir : ${widget.label}',
+              style: const TextStyle(
+                fontSize: 15, fontWeight: FontWeight.w700,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            const Spacer(),
+            GestureDetector(
+              onTap: () => Navigator.pop(context),
+              child: const Icon(Icons.close_rounded,
+                  size: 20, color: AppColors.textMuted),
+            ),
+          ]),
+        ),
+        // Barre de recherche
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+          child: Container(
+            height: 44,
+            decoration: BoxDecoration(
+              color:        AppColors.surfaceElevated,
+              borderRadius: BorderRadius.circular(12),
+              border:       Border.all(color: AppColors.divider),
+            ),
+            child: TextField(
+              controller:  _searchCtrl,
+              autofocus:   true,
+              style: const TextStyle(color: AppColors.textPrimary, fontSize: 13),
+              decoration: InputDecoration(
+                hintText:  'Rechercher ou saisir ${widget.label.toLowerCase()}…',
+                hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+                prefixIcon: const Icon(Icons.search_rounded,
+                    size: 18, color: AppColors.textMuted),
+                border:         InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+            ),
+          ),
+        ),
+        // Liste des résultats
+        Expanded(
+          child: ListView.builder(
+            itemCount: _filtered.length + (_saisieEstNouveau && saisie.isNotEmpty ? 1 : 0),
+            itemBuilder: (_, i) {
+              // Bouton "+ Créer" en dernier si nouvelle valeur
+              if (i == _filtered.length) {
+                return InkWell(
+                  onTap: () => Navigator.pop(
+                    context,
+                    _LocalisationChoix(saisie, estNouveau: true),
+                  ),
+                  child: Container(
+                    margin: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 13),
+                    decoration: BoxDecoration(
+                      color:        AppColors.primaryPink.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(12),
+                      border:       Border.all(
+                          color: AppColors.primaryPink.withOpacity(0.3),
+                          width: 1.5),
+                    ),
+                    child: Row(children: [
+                      const Icon(Icons.add_circle_outline_rounded,
+                          size: 18, color: AppColors.primaryPink),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: RichText(
+                          text: TextSpan(
+                            style: const TextStyle(fontSize: 13),
+                            children: [
+                              const TextSpan(
+                                text: 'Créer « ',
+                                style: TextStyle(color: AppColors.textSecondary),
+                              ),
+                              TextSpan(
+                                text: saisie,
+                                style: const TextStyle(
+                                  color:      AppColors.primaryPink,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const TextSpan(
+                                text: ' »',
+                                style: TextStyle(color: AppColors.textSecondary),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppColors.primaryPink.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: const Text('Nouveau',
+                            style: TextStyle(
+                                fontSize: 9, fontWeight: FontWeight.w700,
+                                color: AppColors.primaryPink)),
+                      ),
+                    ]),
+                  ),
+                );
+              }
+
+              // Entrée normale depuis la BD
+              final opt = _filtered[i];
+              final sel = opt == widget.valeurActuelle;
+              return InkWell(
+                onTap: () => Navigator.pop(
+                  context,
+                  _LocalisationChoix(opt, estNouveau: false),
+                ),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 20, vertical: 13),
+                  color: sel
+                      ? AppColors.primaryPink.withOpacity(0.07)
+                      : Colors.transparent,
+                  child: Row(children: [
+                    const Icon(Icons.location_on_outlined,
+                        size: 15, color: AppColors.textMuted),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(opt, style: TextStyle(
+                        fontSize:   13,
+                        color:      sel
+                            ? AppColors.primaryPink
+                            : AppColors.textPrimary,
+                        fontWeight: sel
+                            ? FontWeight.w600
+                            : FontWeight.w400,
+                      )),
+                    ),
+                    if (sel)
+                      const Icon(Icons.check_circle_rounded,
+                          size: 16, color: AppColors.primaryPink),
+                  ]),
+                ),
+              );
+            },
+          ),
+        ),
+        SizedBox(height: MediaQuery.of(context).padding.bottom + 8),
+      ]),
+    );
+  }
+}
+
 
 // ═══════════════════════════════════════════════════════
 // DISPONIBILITÉ TOGGLE

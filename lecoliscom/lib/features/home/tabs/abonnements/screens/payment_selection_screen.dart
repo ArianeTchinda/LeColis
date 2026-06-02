@@ -4,29 +4,32 @@
 //  1. Résumé du plan
 //  2. Choix du mode (Orange Money / MTN MoMo / Carte)
 //  3. Formulaire selon le mode (numéro téléphone ou email)
-//  4. Appel mock à l'API TaraMoney → affichage des liens retournés
-//
-// À connecter au vrai backend Express plus tard :
-//  le backend reçoit les infos, appelle https://www.dklo.co/api/tara/paymentlinks
-//  et renvoie les liens au client Flutter.
+//  4. Appel backend Express → TaraMoney → affichage des vrais liens
+//  5. Polling statut toutes les 5s pour détecter la confirmation paiement
 
+import 'dart:convert';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
+import '../../../../../core/constants/api_constants.dart';
 import '../../../../../core/constants/app_colors.dart';
 import '../../../../../core/models/abonnement_model.dart';
 
 // ─────────────────────────────────────────────────────────
-// MODÈLE RÉPONSE TARA MONEY
+// MODÈLE RÉPONSE BACKEND → liens TaraMoney
 // ─────────────────────────────────────────────────────────
 class TaraPaymentLinks {
+  final String  transactionId; // ID en DB — utilisé pour le polling
   final String? whatsappLink;
   final String? generalLink;
   final String? cardLink;
   final String? smsLink;
 
   const TaraPaymentLinks({
+    required this.transactionId,
     this.whatsappLink,
     this.generalLink,
     this.cardLink,
@@ -34,11 +37,13 @@ class TaraPaymentLinks {
   });
 
   factory TaraPaymentLinks.fromJson(Map<String, dynamic> json) {
+    final liens = json['liens'] as Map<String, dynamic>? ?? json;
     return TaraPaymentLinks(
-      whatsappLink: json['whatsappLink'],
-      generalLink:  json['generalLink'],
-      cardLink:     json['cardLink'],
-      smsLink:      json['smsLink'],
+      transactionId: json['transactionId'] ?? '',
+      whatsappLink:  liens['whatsappLink'],
+      generalLink:   liens['generalLink'],
+      cardLink:      liens['cardLink'],
+      smsLink:       liens['smsLink'],
     );
   }
 }
@@ -111,7 +116,7 @@ extension ModePaiementExt on ModePaiement {
     }
   }
 
-  /// Catégorie pour regrouper visuellement
+  // Catégorie pour regrouper visuellement
   String get categorie {
     switch (this) {
       case ModePaiement.orangeMoney:
@@ -128,7 +133,7 @@ extension ModePaiementExt on ModePaiement {
     }
   }
 
-  /// Nécessite un numéro de téléphone (Mobile Money)
+  // Nécessite un numéro de téléphone (Mobile Money)
   bool get necessiteNumero {
     switch (this) {
       case ModePaiement.orangeMoney:
@@ -140,7 +145,7 @@ extension ModePaiementExt on ModePaiement {
     }
   }
 
-  /// Nécessite un email (cartes et wallets internationaux)
+  // Nécessite un email (cartes et wallets internationaux)
   bool get necessiteEmail {
     switch (this) {
       case ModePaiement.visa:
@@ -160,8 +165,13 @@ extension ModePaiementExt on ModePaiement {
 // ─────────────────────────────────────────────────────────
 class PaymentSelectionScreen extends StatefulWidget {
   final PlanAbonnement plan;
+  final String         token; // JWT de l'escort connectée
 
-  const PaymentSelectionScreen({super.key, required this.plan});
+  const PaymentSelectionScreen({
+    super.key,
+    required this.plan,
+    required this.token,
+  });
 
   @override
   State<PaymentSelectionScreen> createState() => _PaymentSelectionScreenState();
@@ -171,9 +181,14 @@ class _PaymentSelectionScreenState extends State<PaymentSelectionScreen> {
   // ── État ──────────────────────────────────────────────
   ModePaiement _mode      = ModePaiement.orangeMoney;
   bool         _loading   = false;
-  // ignore: unused_field
   TaraPaymentLinks? _links;
   String?      _erreur;
+  Timer? _pollTimer;
+  bool   _paiementConfirme = false;
+
+  // Polling — vérifie toutes les 5s si le paiement est confirmé
+  // ignore: unused_field
+  String?      _transactionId;
 
   final _formKey    = GlobalKey<FormState>();
   final _telCtrl    = TextEditingController();
@@ -185,32 +200,62 @@ class _PaymentSelectionScreenState extends State<PaymentSelectionScreen> {
     _telCtrl.dispose();
     _nomCtrl.dispose();
     _emailCtrl.dispose();
+    _pollTimer?.cancel();
     super.dispose();
   }
 
-  // ── Appel mock API TaraMoney ──────────────────────────
-  // En production : votre backend Express appelle dklo.co et renvoie les liens.
-  // Ici on simule la réponse avec un délai réaliste.
-  Future<TaraPaymentLinks> _appelMockTaraMoney() async {
-    // Simule la latence réseau
-    await Future.delayed(const Duration(seconds: 2));
+  // ── Vrai appel backend Express ────────────────────────
+  // POST /api/paiement/creer-lien
+  // Le backend appelle TaraMoney et retourne les liens.
+  Future<TaraPaymentLinks> _appelBackend() async {
+    // Récupérer le token depuis le stockage sécurisé
+    // Adapter selon ton système d'auth (Provider, Riverpod, SharedPreferences…)
+    final token = widget.token;
 
-    // Simule la réponse de l'API TaraMoney
-    // En prod : http.post('https://votre-api.com/create-payment-link', body: {...})
-    final mockResponse = {
-      "status":       "success",
-      "message":      "Link successfully generated",
-      "whatsappLink": "https://wa.me/237699000000?text=Paiement+${widget.plan.nom}+${widget.plan.prix}FCFA",
-      "generalLink":  "https://taramoney.com/pay/mock-${widget.plan.id}-${DateTime.now().millisecondsSinceEpoch}",
-      "cardLink":     "https://taramoney.com/card/mock-${widget.plan.id}",
-      "smsLink":      "sms:+237699000000?body=Paiement+${widget.plan.prix}+FCFA+plan+${widget.plan.nom}",
-    };
+    final res = await http.post(
+      Uri.parse('${ApiConstants.baseUrl}/paiement/creer-lien'),
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': 'Bearer $token',
+      },
+      body: jsonEncode({ 'planId': widget.plan.id }),
+    ).timeout(const Duration(seconds: 15));
 
-    return TaraPaymentLinks.fromJson(mockResponse);
+    if (res.statusCode == 200) {
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      return TaraPaymentLinks.fromJson(body);
+    }
+
+    try {
+      final err = jsonDecode(res.body);
+      throw Exception(err['message'] ?? 'Erreur serveur (${res.statusCode}).');
+    } catch (_) {
+      throw Exception('Erreur serveur (${res.statusCode}).');
+    }
   }
 
   Future<void> _initierPaiement() async {
-    if (!_formKey.currentState!.validate()) return;
+    // Validation manuelle — l'accordéon AnimatedCrossFade empêche
+    // _formKey.currentState?.validate() d'atteindre tous les champs
+    final nom = _nomCtrl.text.trim();
+    if (nom.isEmpty) {
+      setState(() => _erreur = 'Veuillez entrer votre nom complet.');
+      return;
+    }
+    if (_mode.necessiteNumero) {
+      final tel = _telCtrl.text.trim().replaceAll(' ', '');
+      if (tel.isEmpty || tel.length < 8) {
+        setState(() => _erreur = 'Veuillez entrer un numéro de téléphone valide.');
+        return;
+      }
+    }
+    if (_mode.necessiteEmail) {
+      final email = _emailCtrl.text.trim();
+      if (email.isEmpty || !email.contains('@')) {
+        setState(() => _erreur = 'Veuillez entrer une adresse email valide.');
+        return;
+      }
+    }
 
     setState(() {
       _loading = true;
@@ -219,16 +264,19 @@ class _PaymentSelectionScreenState extends State<PaymentSelectionScreen> {
     });
 
     try {
-      final links = await _appelMockTaraMoney();
+      // /paiement/creer-lien crée la transaction + l'abonnement EN_ATTENTE
+      // et appelle TaraMoney en une seule requête.
+      final links = await _appelBackend();
       setState(() {
-        _links   = links;
-        _loading = false;
+        _links         = links;
+        _transactionId = links.transactionId;
+        _loading       = false;
       });
-      // Scroll vers les liens
       _showLinksBottomSheet(links);
+      _startPolling();
     } catch (e) {
       setState(() {
-        _erreur  = 'Erreur lors de la génération du lien. Réessayez.';
+        _erreur  = e.toString().replaceFirst('Exception: ', '');
         _loading = false;
       });
     }
@@ -249,6 +297,34 @@ class _PaymentSelectionScreenState extends State<PaymentSelectionScreen> {
       }
     }
   }
+
+  void _startPolling() {
+  _pollTimer?.cancel();
+  _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
+    if (_transactionId == null || _paiementConfirme) return;
+    try {
+      final res = await http.get(
+        Uri.parse('${ApiConstants.baseUrl}/paiement/statut/$_transactionId'),
+        headers: {
+          'Content-Type':  'application/json',
+          'Authorization': 'Bearer ${widget.token}',
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      if (res.statusCode == 200) {
+        final body = jsonDecode(res.body);
+        if (body['statut'] == 'SUCCES') {
+          _pollTimer?.cancel();
+          _paiementConfirme = true;
+          if (mounted) {
+            Navigator.pop(context); // fermer le bottom sheet si ouvert
+            Navigator.pop(context, true); // retourner true à abonnements_tab
+          }
+        }
+      }
+    } catch (_) {} // silencieux — on réessaiera dans 5s
+  });
+}
 
   void _copierLien(String url) {
     Clipboard.setData(ClipboardData(text: url));

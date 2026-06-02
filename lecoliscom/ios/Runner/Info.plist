@@ -2,6 +2,26 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <!-- Caméra -->
+    <key>NSCameraUsageDescription</key>
+    <string>LeColis a besoin de la caméra pour prendre vos photos.</string>
+
+    <!-- Galerie -->
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>LeColis a besoin d'accéder à votre galerie pour choisir vos photos.</string>
+
+    <!-- Galerie — écriture -->
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>LeColis a besoin de sauvegarder des photos dans votre galerie.</string>
+
+    <!-- Localisation — pendant l'utilisation -->
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>LeColis a besoin de votre position pour afficher les annonces près de vous.</string>
+
+    <!-- Localisation — toujours (si besoin en arrière-plan) -->
+    <key>NSLocationAlwaysUsageDescription</key>
+    <string>LeColis a besoin de votre position en arrière-plan.</string>
+
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>

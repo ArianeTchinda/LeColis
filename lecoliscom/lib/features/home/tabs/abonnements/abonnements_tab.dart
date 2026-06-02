@@ -7,17 +7,19 @@ import '../../../../core/models/transaction_model.dart';
 import '/core/models/escort_model.dart';
 import './widgets/transaction_card.dart';
 import './screens/payment_selection_screen.dart';
+import '/core/services/abonnement_service.dart';
 
 class AbonnementsTab extends StatefulWidget {
   final ValueNotifier<String>? searchQuery;
-
-  /// ← NOUVEAU : callback fourni par HomeScreen pour basculer vers l'onglet Profil
   final VoidCallback? onGoToLogin;
+  /// Onglet interne à afficher à l'ouverture : 0=Plans, 1=Mon abonnement, 2=Historique
+  final int initialTabIndex;
 
   const AbonnementsTab({
     super.key,
     this.searchQuery,
-    this.onGoToLogin, // ← NOUVEAU
+    this.onGoToLogin,
+    this.initialTabIndex = 0,
   });
 
   @override
@@ -30,46 +32,45 @@ class _AbonnementsTabState extends State<AbonnementsTab>
   final SessionManager _session = SessionManager();
 
   bool get estConnecte => _session.estConnecte;
-  String get activePlanId => 'p1';
 
-  final List<PlanAbonnement> _plans = [
-    const PlanAbonnement(
-      id: 'p1', nom: 'Basique',
-      description: 'Offert à chaque nouvelle inscription. Idéal pour découvrir la plateforme.',
-      prix: 0, nbPublications: 1, dureeJours: 7,
-      avantages: ['1 publication active', 'Visible pendant 7 jours', 'Accès au profil public', 'Gratuit, sans engagement'],
-      accentColor: Color(0xFF8A8A9A), icone: Icons.star_outline_rounded,
-    ),
-    const PlanAbonnement(
-      id: 'p2', nom: 'Standard',
-      description: 'Plus de visibilité pour développer votre clientèle.',
-      prix: 5000, nbPublications: 3, dureeJours: 30,
-      avantages: ['3 publications actives', 'Visible pendant 30 jours', 'Badge "Standard" vérifié', 'Support prioritaire'],
-      accentColor: Color(0xFFFF5DA8), icone: Icons.verified_outlined,
-    ),
-    const PlanAbonnement(
-      id: 'p3', nom: 'Premium',
-      description: 'Mise en avant maximale et publications illimitées.',
-      prix: 15000, nbPublications: 10, dureeJours: 30,
-      avantages: ['10 publications actives', 'Mise en avant prioritaire', 'Badge "Premium" ✦ doré', 'Statistiques de vues avancées'],
-      accentColor: Color(0xFFFFB800), icone: Icons.workspace_premium_rounded,
-    ),
-  ];
+  // ── Données API (remplacent les listes mock) ──────────
+  List<PlanAbonnement>    _plans        = [];
+  List<TransactionModel>  _transactions = [];
+  AbonnementSouscrit?     _abonnementActif;
 
-  final List<TransactionModel> _transactions = [
-    TransactionModel(id: 't1', planNom: 'Standard', montant: 5000,
-      date: DateTime(2025, 5, 6), statut: TransactionStatus.succes, methodePaiement: 'Orange Money'),
-    TransactionModel(id: 't2', planNom: 'Premium', montant: 15000,
-      date: DateTime(2025, 4, 1), statut: TransactionStatus.succes, methodePaiement: 'MTN MoMo'),
-  ];
+  // États de chargement par section
+  bool _loadingPlans        = false;
+  bool _loadingAbonnement   = false;
+  bool _loadingTransactions = false;
 
-  PlanAbonnement get _planActuel => _plans.firstWhere((p) => p.id == activePlanId);
+  // Erreurs par section (null = pas d'erreur)
+  String? _erreurPlans;
+  String? _erreurAbonnement;
+  String? _erreurTransactions;
+
+  // Plan actuellement actif — null si pas d'abonnement
+  PlanAbonnement? get _planActuel => _abonnementActif?.plan;
+
+  // Plans supérieurs au plan actuel (pour les boutons upgrade)
+  List<PlanAbonnement> get _plansSuperieurs {
+    if (_planActuel == null) return _plans;
+    final idx = _plans.indexWhere((p) => p.id == _planActuel!.id);
+    if (idx < 0) return [];
+    return _plans.sublist(idx + 1);
+  }
 
   @override
   void initState() {
     super.initState();
-    _innerTabController = TabController(length: 3, vsync: this);
+    _innerTabController = TabController(
+      length: 3,
+      vsync: this,
+      initialIndex: widget.initialTabIndex.clamp(0, 2),
+    );
     _session.addListener(_onSessionChange);
+    // Chargement initial
+    _chargerPlans();
+    if (estConnecte) _chargerDonneesConnecte();
   }
 
   @override
@@ -80,17 +81,84 @@ class _AbonnementsTabState extends State<AbonnementsTab>
   }
 
   void _onSessionChange() {
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {});
+      // Quand l'utilisateur se connecte → charger ses données
+      if (estConnecte) _chargerDonneesConnecte();
+    }
   }
 
-  void _allerAuPaiement(PlanAbonnement plan) {
-    Navigator.push(context, MaterialPageRoute(
-      builder: (_) => PaymentSelectionScreen(plan: plan),
-    ));
+  // ── Chargement public : plans (sans token) ────────────
+  Future<void> _chargerPlans() async {
+    setState(() { _loadingPlans = true; _erreurPlans = null; });
+    try {
+      final plans = await AbonnementService.listerPlans();
+      if (mounted) setState(() { _plans = plans; _loadingPlans = false; });
+    } catch (e) {
+      if (mounted) setState(() {
+        _erreurPlans   = 'Impossible de charger les plans.';
+        _loadingPlans  = false;
+      });
+    }
   }
 
-  /// ← MODIFIÉ : au lieu de pushNamed('/login'), on appelle le callback
-  /// qui fait basculer HomeScreen sur l'onglet Profil (index 2)
+  // ── Chargement connecté : abonnement actif + transactions
+  Future<void> _chargerDonneesConnecte() async {
+    final token = _session.accessToken;
+    if (token == null) return;
+    _chargerAbonnement(token);
+    _chargerTransactions(token);
+  }
+
+  Future<void> _chargerAbonnement(String token) async {
+    setState(() { _loadingAbonnement = true; _erreurAbonnement = null; });
+    try {
+      final ab = await AbonnementService.monAbonnement(token);
+      if (mounted) setState(() { _abonnementActif = ab; _loadingAbonnement = false; });
+    } catch (e) {
+      if (mounted) setState(() {
+        _erreurAbonnement  = 'Impossible de charger votre abonnement.';
+        _loadingAbonnement = false;
+      });
+    }
+  }
+
+  Future<void> _chargerTransactions(String token) async {
+    setState(() { _loadingTransactions = true; _erreurTransactions = null; });
+    try {
+      final txs = await AbonnementService.mesTransactions(token);
+      if (mounted) setState(() { _transactions = txs; _loadingTransactions = false; });
+    } catch (e) {
+      if (mounted) setState(() {
+        _erreurTransactions  = 'Impossible de charger les transactions.';
+        _loadingTransactions = false;
+      });
+    }
+  }
+
+  Future<void> _allerAuPaiement(PlanAbonnement plan) async {
+    final token = _session.accessToken;
+    if (token == null) { _goToLogin(); return; }
+
+    final result = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PaymentSelectionScreen(plan: plan, token: token),
+      ),
+    );
+    // Si PaymentSelectionScreen retourne true → souscription réussie
+    // → on rafraîchit l'abonnement et les transactions
+    if (result == true && mounted) {
+      final token = _session.accessToken;
+      if (token != null) {
+        _chargerAbonnement(token);
+        _chargerTransactions(token);
+      }
+    }
+  }
+
+  // ← MODIFIÉ : au lieu de pushNamed('/login'), on appelle le callback
+  // qui fait basculer HomeScreen sur l'onglet Profil (index 2)
   void _goToLogin() {
     widget.onGoToLogin?.call();
   }
@@ -196,6 +264,35 @@ class _AbonnementsTabState extends State<AbonnementsTab>
 
   // ── VUE 1 : PLANS
   Widget _buildPlansView(bool isDesktop, double hPad) {
+    // État chargement
+    if (_loadingPlans) {
+      return const Center(child: CircularProgressIndicator(
+          strokeWidth: 2, color: AppColors.primaryPink));
+    }
+
+    // État erreur
+    if (_erreurPlans != null) {
+      return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const Icon(Icons.wifi_off_rounded, size: 48, color: AppColors.textMuted),
+        const SizedBox(height: 12),
+        Text(_erreurPlans!, style: const TextStyle(color: AppColors.textSecondary, fontSize: 14)),
+        const SizedBox(height: 16),
+        GestureDetector(
+          onTap: _chargerPlans,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppColors.primaryPink.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.primaryPink.withOpacity(0.3)),
+            ),
+            child: const Text('Réessayer',
+              style: TextStyle(color: AppColors.primaryPink, fontWeight: FontWeight.w600)),
+          ),
+        ),
+      ]));
+    }
+
     return ValueListenableBuilder<String>(
       valueListenable: widget.searchQuery ?? ValueNotifier(''),
       builder: (context, query, _) {
@@ -211,36 +308,33 @@ class _AbonnementsTabState extends State<AbonnementsTab>
           ]));
         }
 
+        // ID du plan actif (null si pas d'abonnement)
+        final planActifId = _abonnementActif?.plan.id;
+
         return SingleChildScrollView(
           padding: EdgeInsets.fromLTRB(hPad, 16, hPad, 100),
           child: isDesktop
-            ? Column(
-                children: [
-                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: filtered.map((plan) =>
-                      Expanded(child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: _PlanCard(
-                          plan: plan,
-                          isActuel: plan.id == activePlanId,
-                          estConnecte: estConnecte,
-                          onTap: () => estConnecte
-                              ? _allerAuPaiement(plan)
-                              : _goToLogin(),
-                        ),
-                      ))).toList()),
-                  const SizedBox(height: 32),
-                  _AppDownloadBanner(),
-                ],
-              )
+            ? Column(children: [
+                Row(crossAxisAlignment: CrossAxisAlignment.start,
+                  children: filtered.map((plan) => Expanded(child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: _PlanCard(
+                      plan:        plan,
+                      isActuel:    plan.id == planActifId,
+                      estConnecte: estConnecte,
+                      onTap: () => estConnecte ? _allerAuPaiement(plan) : _goToLogin(),
+                    ),
+                  ))).toList()),
+                const SizedBox(height: 32),
+                _AppDownloadBanner(),
+              ])
             : Column(children: filtered.map((plan) => Padding(
                 padding: const EdgeInsets.only(bottom: 16),
                 child: _PlanCard(
-                  plan: plan,
-                  isActuel: plan.id == activePlanId,
+                  plan:        plan,
+                  isActuel:    plan.id == planActifId,
                   estConnecte: estConnecte,
-                  onTap: () => estConnecte
-                      ? _allerAuPaiement(plan)
-                      : _goToLogin(),
+                  onTap: () => estConnecte ? _allerAuPaiement(plan) : _goToLogin(),
                 ),
               )).toList()),
         );
@@ -251,12 +345,73 @@ class _AbonnementsTabState extends State<AbonnementsTab>
   // ── VUE 2 : MON ABONNEMENT
   Widget _buildAbonnementActifView(bool isDesktop, double hPad) {
     if (!estConnecte) return _murConnexion();
-    final plan      = _planActuel;
-    final color     = plan.accentColor;
-    final dateDebut = DateTime.now().subtract(const Duration(days: 3));
-    final dateFin   = dateDebut.add(Duration(days: plan.dureeJours));
-    final progress  = (3.0 / plan.dureeJours).clamp(0.0, 1.0);
-    final restants  = dateFin.difference(DateTime.now()).inDays;
+
+    if (_loadingAbonnement) {
+      return const Center(child: CircularProgressIndicator(
+          strokeWidth: 2, color: AppColors.primaryPink));
+    }
+
+    if (_erreurAbonnement != null) {
+      return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const Icon(Icons.wifi_off_rounded, size: 48, color: AppColors.textMuted),
+        const SizedBox(height: 12),
+        Text(_erreurAbonnement!,
+          style: const TextStyle(color: AppColors.textSecondary, fontSize: 14)),
+        const SizedBox(height: 16),
+        GestureDetector(
+          onTap: () { final t = _session.accessToken; if (t != null) _chargerAbonnement(t); },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppColors.primaryPink.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.primaryPink.withOpacity(0.3)),
+            ),
+            child: const Text('Réessayer',
+              style: TextStyle(color: AppColors.primaryPink, fontWeight: FontWeight.w600)),
+          ),
+        ),
+      ]));
+    }
+
+    if (_abonnementActif == null) {
+      return Center(child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: AppColors.primaryPink.withOpacity(0.08), shape: BoxShape.circle),
+            child: const Icon(Icons.subscriptions_outlined,
+              color: AppColors.primaryPink, size: 40)),
+          const SizedBox(height: 20),
+          Text('Aucun abonnement actif',
+            style: GoogleFonts.cormorantGaramond(
+              fontSize: 22, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+          const SizedBox(height: 8),
+          const Text("Choisissez un plan dans l'onglet Plans pour commencer.",
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+          const SizedBox(height: 20),
+          GestureDetector(
+            onTap: () => _innerTabController.animateTo(0),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFFFF5DA8), Color(0xFFB68DFF)]),
+                borderRadius: BorderRadius.circular(14)),
+              child: const Text('Voir les plans',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+            ),
+          ),
+        ]),
+      ));
+    }
+
+    final ab       = _abonnementActif!;
+    final plan     = ab.plan;
+    final color    = plan.accentColor;
+    final progress = (ab.quotaUtilise / ab.quotaTotal.clamp(1, 9999)).clamp(0.0, 1.0);
 
     return SingleChildScrollView(
       padding: EdgeInsets.fromLTRB(isDesktop ? 80 : hPad, 16, isDesktop ? 80 : hPad, 100),
@@ -278,7 +433,7 @@ class _AbonnementsTabState extends State<AbonnementsTab>
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text('Plan ${plan.nom}', style: GoogleFonts.cormorantGaramond(
                   fontSize: 22, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                Text(plan.prix == 0 ? 'Gratuit' : '${plan.prix} FCFA',
+                Text(plan.prix == 0 ? 'Gratuit' : '${plan.prix.toInt()} FCFA / mois',
                   style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
               ])),
               Container(
@@ -295,16 +450,17 @@ class _AbonnementsTabState extends State<AbonnementsTab>
             const SizedBox(height: 20),
             Divider(color: AppColors.divider.withOpacity(0.5)),
             const SizedBox(height: 16),
-            _row(Icons.calendar_today_rounded, 'Début',         _fmtDate(dateDebut), color),
+            _row(Icons.calendar_today_rounded,   'Début',          _fmtDate(ab.dateDebut),       color),
             const SizedBox(height: 10),
-            _row(Icons.event_rounded,          'Expiration',    _fmtDate(dateFin),   color),
+            _row(Icons.event_rounded,            'Expiration',     _fmtDate(ab.dateFin),         color),
             const SizedBox(height: 10),
-            _row(Icons.hourglass_bottom_rounded,'Jours restants','$restants jours',  color),
+            _row(Icons.hourglass_bottom_rounded, 'Jours restants', '${ab.joursRestants} jours',  color),
             const SizedBox(height: 10),
-            _row(Icons.layers_outlined,        'Publications',  '0 / ${plan.nbPublications}', color),
+            _row(Icons.layers_outlined,          'Publications',   '${ab.quotaUtilise} / ${ab.quotaTotal}', color),
             const SizedBox(height: 18),
             Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              const Text('Progression', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+              const Text('Quota utilisé',
+                style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
               Text('${(progress * 100).toInt()}%',
                 style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w600)),
             ]),
@@ -319,24 +475,61 @@ class _AbonnementsTabState extends State<AbonnementsTab>
         Text('Actions disponibles', style: GoogleFonts.cormorantGaramond(
           fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
         const SizedBox(height: 12),
-        if (plan.id != 'p1')
-          _bouton(icon: Icons.refresh_rounded, label: 'Renouveler le plan ${plan.nom}',
+        if (plan.prix > 0)
+          _bouton(icon: Icons.refresh_rounded,
+            label:     'Renouveler le plan ${plan.nom}',
             sousTitre: 'Commencera après expiration', color: color,
             onTap: () => _allerAuPaiement(plan)),
         const SizedBox(height: 10),
-        ..._plans.where((p) => _plans.indexOf(p) > _plans.indexOf(plan)).map((p) =>
-          Padding(padding: const EdgeInsets.only(bottom: 10),
-            child: _bouton(icon: Icons.arrow_upward_rounded,
-              label: 'Passer au plan ${p.nom}',
-              sousTitre: p.prix == 0 ? 'Gratuit' : '${p.prix} FCFA / mois',
-              color: p.accentColor, onTap: () => _allerAuPaiement(p)))),
+        ..._plansSuperieurs.map((p) => Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: _bouton(icon: Icons.arrow_upward_rounded,
+            label:     'Passer au plan ${p.nom}',
+            sousTitre: p.prix == 0 ? 'Gratuit' : '${p.prix.toInt()} FCFA / mois',
+            color: p.accentColor, onTap: () => _allerAuPaiement(p)))),
       ]),
     );
   }
-
   // ── VUE 3 : HISTORIQUE
   Widget _buildHistoriqueView(bool isDesktop, double hPad) {
     if (!estConnecte) return _murConnexion();
+
+    if (_loadingTransactions) {
+      return const Center(child: CircularProgressIndicator(
+          strokeWidth: 2, color: AppColors.primaryPink));
+    }
+
+    if (_erreurTransactions != null) {
+      return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const Icon(Icons.wifi_off_rounded, size: 48, color: AppColors.textMuted),
+        const SizedBox(height: 12),
+        Text(_erreurTransactions!,
+          style: const TextStyle(color: AppColors.textSecondary, fontSize: 14)),
+        const SizedBox(height: 16),
+        GestureDetector(
+          onTap: () { final t = _session.accessToken; if (t != null) _chargerTransactions(t); },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppColors.primaryPink.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.primaryPink.withOpacity(0.3)),
+            ),
+            child: const Text('Réessayer',
+              style: TextStyle(color: AppColors.primaryPink, fontWeight: FontWeight.w600)),
+          ),
+        ),
+      ]));
+    }
+
+    if (_transactions.isEmpty) {
+      return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const Icon(Icons.receipt_long_outlined, size: 48, color: AppColors.textMuted),
+        const SizedBox(height: 12),
+        const Text('Aucune transaction pour le moment.',
+          style: TextStyle(color: AppColors.textSecondary, fontSize: 14)),
+      ]));
+    }
 
     return ListView(
       padding: EdgeInsets.fromLTRB(isDesktop ? 80 : hPad, 16, isDesktop ? 80 : hPad, 100),
@@ -353,7 +546,6 @@ class _AbonnementsTabState extends State<AbonnementsTab>
       ],
     );
   }
-
   // ── HELPERS UI
   Widget _row(IconData icon, String label, String value, Color color) => Row(children: [
     Icon(icon, size: 14, color: color),
@@ -389,7 +581,7 @@ class _AbonnementsTabState extends State<AbonnementsTab>
     );
   }
 
-  /// Mur affiché dans "Mon abonnement" et "Historique" quand non connecté
+  // Mur affiché dans "Mon abonnement" et "Historique" quand non connecté
   Widget _murConnexion() => Center(child: Padding(
     padding: const EdgeInsets.all(32),
     child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -571,7 +763,7 @@ class _StoreBadge extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════
-// PLAN CARD — widget interne
+// PLAN CARD — widget interne (dans abonnements_tab.dart)
 // ═══════════════════════════════════════════════════════════
 class _PlanCard extends StatelessWidget {
   final PlanAbonnement plan;
@@ -580,14 +772,17 @@ class _PlanCard extends StatelessWidget {
   final VoidCallback   onTap;
 
   const _PlanCard({
-    required this.plan, required this.isActuel,
-    required this.estConnecte, required this.onTap,
+    required this.plan,
+    required this.isActuel,
+    required this.estConnecte,
+    required this.onTap,
   });
+
+  bool get _estBasique => plan.estBasique || plan.nom.toLowerCase() == 'basique';
 
   @override
   Widget build(BuildContext context) {
-    final color    = plan.accentColor;
-    final isBasique = plan.id == 'p1';
+    final color = plan.accentColor;
 
     return Container(
       decoration: BoxDecoration(
@@ -597,8 +792,9 @@ class _PlanCard extends StatelessWidget {
           color: isActuel ? color.withOpacity(0.5) : AppColors.divider,
           width: isActuel ? 1.5 : 1,
         ),
-        boxShadow: isActuel ? [BoxShadow(
-          color: color.withOpacity(0.14), blurRadius: 20, offset: const Offset(0, 6))] : null,
+        boxShadow: isActuel ? [
+          BoxShadow(color: color.withOpacity(0.14), blurRadius: 20, offset: const Offset(0, 6))
+        ] : null,
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(24),
@@ -607,18 +803,21 @@ class _PlanCard extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.all(20),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-
               Row(children: [
-                Container(padding: const EdgeInsets.all(10),
+                Container(
+                  padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(color: color.withOpacity(0.12), shape: BoxShape.circle),
-                  child: Icon(plan.icone, color: color, size: 22)),
+                  child: Icon(plan.icone, color: color, size: 22),
+                ),
                 const SizedBox(width: 12),
-                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(plan.nom, style: GoogleFonts.cormorantGaramond(
-                    fontSize: 21, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                  Text('${plan.dureeJours}j · ${plan.nbPublications} pub.',
-                    style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
-                ])),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(plan.nom, style: GoogleFonts.cormorantGaramond(
+                      fontSize: 21, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                    Text('${plan.dureeJours}j · ${plan.nbPublications} pub.',
+                      style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                  ]),
+                ),
                 if (isActuel)
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
@@ -628,6 +827,16 @@ class _PlanCard extends StatelessWidget {
                     ),
                     child: Text('Actif', style: TextStyle(
                       color: color, fontSize: 11, fontWeight: FontWeight.w700)),
+                  )
+                else if (_estBasique)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Text('Offert', style: TextStyle(
+                      color: Colors.grey, fontSize: 11, fontWeight: FontWeight.w600)),
                   ),
               ]),
 
@@ -661,7 +870,7 @@ class _PlanCard extends StatelessWidget {
               )),
 
               const SizedBox(height: 18),
-              _buildCTA(color, isBasique, context),
+              _buildCTA(color, context),
             ]),
           ),
         ]),
@@ -669,33 +878,51 @@ class _PlanCard extends StatelessWidget {
     );
   }
 
-  Widget _buildCTA(Color color, bool isBasique, BuildContext context) {
-    if (isBasique && isActuel) {
+  Widget _buildCTA(Color color, BuildContext context) {
+    if (_estBasique) {
       return Container(
-        width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 13),
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 13),
         decoration: BoxDecoration(
-          color: AppColors.surfaceElevated, borderRadius: BorderRadius.circular(14)),
-        child: const Text('Plan offert à l\'inscription', textAlign: TextAlign.center,
-          style: TextStyle(color: AppColors.textMuted, fontSize: 13, fontWeight: FontWeight.w500)),
+          color: AppColors.surfaceElevated,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: const Text(
+          'Plan offert à l\'inscription',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: AppColors.textMuted,
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
       );
     }
 
-    // Non connecté → bouton qui remonte via onTap (déjà branché sur _goToLogin)
     if (!estConnecte) {
       return GestureDetector(
-        onTap: onTap, // ← pointe sur _goToLogin via le parent
+        onTap: onTap,
         child: Container(
-          width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 13),
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(vertical: 13),
           decoration: BoxDecoration(
             color: AppColors.primaryPink.withOpacity(0.08),
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppColors.primaryPink.withOpacity(0.35))),
-          child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Icon(Icons.login_rounded, size: 14, color: AppColors.primaryPink),
-            SizedBox(width: 6),
-            Text('Connectez-vous pour souscrire',
-              style: TextStyle(color: AppColors.primaryPink, fontSize: 12, fontWeight: FontWeight.w600)),
-          ]),
+            border: Border.all(color: AppColors.primaryPink.withOpacity(0.35)),
+          ),
+          child: const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.login_rounded, size: 14, color: AppColors.primaryPink),
+              SizedBox(width: 6),
+              Text('Connectez-vous pour souscrire',
+                style: TextStyle(
+                  color: AppColors.primaryPink,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                )),
+            ],
+          ),
         ),
       );
     }
@@ -703,14 +930,18 @@ class _PlanCard extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 13),
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 13),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.11), borderRadius: BorderRadius.circular(14),
+          color: color.withOpacity(0.11),
+          borderRadius: BorderRadius.circular(14),
           border: Border.all(color: color.withOpacity(0.32)),
         ),
-        child: Text(isActuel ? 'Renouveler' : 'Choisir ce plan',
+        child: Text(
+          isActuel ? 'Renouveler' : 'Choisir ce plan',
           textAlign: TextAlign.center,
-          style: TextStyle(color: color, fontSize: 14, fontWeight: FontWeight.w700)),
+          style: TextStyle(color: color, fontSize: 14, fontWeight: FontWeight.w700),
+        ),
       ),
     );
   }

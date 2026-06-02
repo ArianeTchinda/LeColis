@@ -28,10 +28,15 @@ router.get('/historique-abonnements', abCtrl.historique);
 
 // ── Publications ──
 router.get('/publications',                        pubCtrl.mesPubs);
+router.get('/publications/:id',                    pubCtrl.getOne);
+router.get('/publications/:id/stats',              pubCtrl.statsPublication);
+router.get('/publications/:id/avis',               pubCtrl.avisPublication);
 router.post('/publications',                       pubCtrl.creer);
 router.put('/publications/:id',                    pubCtrl.modifier);
 router.delete('/publications/:id',                 pubCtrl.supprimer);
 router.post('/publications/:id/images', uploadImages, pubCtrl.ajouterImages);
 router.delete('/publications/:id/images/:imageId', pubCtrl.supprimerImage);
+
+router.delete('/compte', ctrl.supprimerCompte);
 
 module.exports = router;

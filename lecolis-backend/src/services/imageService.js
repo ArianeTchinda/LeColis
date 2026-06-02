@@ -27,13 +27,27 @@ async function uploadPhotoEscort(buffer, escortId) {
  * @returns {{ url: string, key: string }}
  */
 async function uploadImagePublication(buffer, publicationId, ordre = 0) {
-  const optimized = await sharp(buffer)
-    .resize(1200, 900, { fit: 'inside', withoutEnlargement: true })
-    .jpeg({ quality: 82 })
-    .toBuffer();
+  try {
+    console.log(`[imageService] uploadImagePublication start - pubId=${publicationId}, ordre=${ordre}, bufferSize=${buffer.length}`);
+    
+    const optimized = await sharp(buffer)
+      .resize(1200, 900, { fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 82 })
+      .toBuffer();
 
-  const key = `publications/${publicationId}/img_${ordre}_${uuidv4()}.jpg`;
-  return uploadBuffer(BUCKETS.PUBLICATIONS, key, optimized, 'image/jpeg');
+    console.log(`[imageService] Image optimized - originalSize=${buffer.length}, optimizedSize=${optimized.length}`);
+
+    const key = `publications/${publicationId}/img_${ordre}_${uuidv4()}.jpg`;
+    console.log(`[imageService] Uploading to MinIO - bucket=PUBLICATIONS, key=${key}`);
+    
+    const result = await uploadBuffer(BUCKETS.PUBLICATIONS, key, optimized, 'image/jpeg');
+    
+    console.log(`[imageService] Upload success - url=${result.url}`);
+    return result;
+  } catch (err) {
+    console.error(`[imageService] uploadImagePublication error:`, err);
+    throw err;
+  }
 }
 
 /**

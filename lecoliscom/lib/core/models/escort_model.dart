@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/services/auth_service.dart';
 import '../../../../core/models/auth_response.dart';
+import '../constants/api_constants.dart';
 
 // ─────────────────────────────────────────────────────────
 // MODÈLE ESCORT (utilisateur connecté)
@@ -27,16 +28,43 @@ class EscortModel {
     required this.dateInscription,
   });
 
-  factory EscortModel.fromJson(Map<String, dynamic> json) => EscortModel(
-    id:              json['id'],
-    pseudo:          json['pseudo'],
-    email:           json['email'],
-    telephone:       json['telephone'] ?? '',
-    photoUrl:        json['photoUrl'],
-    estVerifie:      json['estVerifie'] ?? false,
-    dateInscription: DateTime.parse(
-        json['createdAt'] ?? DateTime.now().toIso8601String()),
-  );
+  factory EscortModel.fromJson(Map<String, dynamic> json) {
+    final rawPhoto = json['photoUrl'];
+    final proxied = rawPhoto == null
+        ? null
+        : '${ApiConstants.baseUrl}/proxy-image?url=${Uri.encodeComponent(rawPhoto)}';
+
+    return EscortModel(
+      id:              json['id'],
+      pseudo:          json['pseudo'],
+      email:           json['email'],
+      telephone:       json['telephone'] ?? '',
+      photoUrl:        proxied,
+      estVerifie:      json['estVerifie'] ?? false,
+      dateInscription: DateTime.parse(
+          json['createdAt'] ?? DateTime.now().toIso8601String()),
+    );
+  }
+
+  // Utilisé par le contexte admin (GET /admin/escorts)
+  // Les champs sont à plat — même structure que fromJson mais sans dépendance
+  // sur ApiConstants (le proxy n'est pas nécessaire côté admin dashboard web)
+  factory EscortModel.fromJsonAdmin(Map<String, dynamic> json) {
+    final rawPhoto = json['photoUrl'];
+    final proxied = (rawPhoto != null && rawPhoto.toString().isNotEmpty)
+        ? '${ApiConstants.baseUrl}/proxy-image?url=${Uri.encodeComponent(rawPhoto.toString())}'
+        : null;
+
+    return EscortModel(
+      id:              json['id']?.toString() ?? '',
+      pseudo:          json['pseudo'] ?? '',
+      email:           json['email'] ?? '',
+      telephone:       json['telephone'] ?? '',
+      photoUrl:        proxied,
+      estVerifie:      json['estVerifie'] ?? false,
+      dateInscription: DateTime.tryParse(json['createdAt'] ?? '') ?? DateTime.now(),
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────
@@ -70,6 +98,9 @@ class PublicationGestion {
   final StatutPublication statut;
   final int               vues;
   final DateTime          dateExpiration;
+  final int               nbAvis;
+  final double            noteMoyenne;
+  final bool              estDisponible;
 
   const PublicationGestion({
     required this.id,
@@ -79,11 +110,56 @@ class PublicationGestion {
     required this.statut,
     required this.vues,
     required this.dateExpiration,
+    this.nbAvis        = 0,
+    this.noteMoyenne   = 0.0,
+    this.estDisponible = true,
   });
 
   int get joursRestants =>
       dateExpiration.difference(DateTime.now()).inDays.clamp(0, 9999);
+
+// ── LA FACTORY MANQUANTE QUI REÇOIT LES DONNÉES DU BACKEND ──
+  factory PublicationGestion.fromJson(Map<String, dynamic> json) {
+    // 1. Parsing sécurisé du statut enum
+    StatutPublication st = StatutPublication.brouillon;
+    final sStr = json['statut']?.toString().toUpperCase();
+    if (sStr == 'ACTIVE')   st = StatutPublication.active;
+    if (sStr == 'EXPIREE')  st = StatutPublication.expiree;
+    if (sStr == 'MASQUEE')  st = StatutPublication.brouillon; // ou masquée selon ta logique
+
+    // 2. Extraction sécurisée de l'image de couverture
+    String? img;
+    if (json['images'] is List && (json['images'] as List).isNotEmpty) {
+      img = json['images'][0]['url']?.toString();
+    }
+
+    // 3. Extraction sécurisée du nom de la catégorie principale
+    String cat = 'Général';
+    if (json['categories'] is List && (json['categories'] as List).isNotEmpty) {
+      final prems = json['categories'][0];
+      if (prems is Map) {
+        cat = prems['nom']?.toString() ?? 'Général';
+      }
+    }
+
+    return PublicationGestion(
+      id:             json['id']?.toString() ?? '',
+      titre:          json['titre']?.toString() ?? 'Sans titre',
+      categorie:      cat,
+      imageUrl:       img,
+      statut:         st,
+      vues:           (json['vues'] as num? ?? 0).toInt(),
+      dateExpiration: DateTime.tryParse(json['dateExpiration']?.toString() ?? '') ?? DateTime.now(),
+      
+      // Récupération directe des deux nouveaux champs typés et sécurisés
+      nbAvis:         (json['nbAvis'] as num? ?? 0).toInt(),
+      noteMoyenne:    (json['noteMoyenne'] as num? ?? 0.0).toDouble(),
+      estDisponible:  json['estDisponible'] ?? true,
+    );
+  }
 }
+
+
 
 // ─────────────────────────────────────────────────────────
 // SESSION MANAGER — auth réelle via API
@@ -182,6 +258,13 @@ class SessionManager extends ChangeNotifier {
     final prefs   = await SharedPreferences.getInstance();
     await prefs.setString('accessToken',  res.accessToken);
     await prefs.setString('refreshToken', res.refreshToken);
+    notifyListeners();
+  }
+
+  // Met à jour l'objet Escort en mémoire et notifie les listeners.
+  // Utilisez ceci lorsque le profil a été modifié côté serveur (photo, email, etc.).
+  void updateEscort(EscortModel escort) {
+    _escort = escort;
     notifyListeners();
   }
 }

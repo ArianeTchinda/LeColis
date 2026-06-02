@@ -10,6 +10,7 @@ const authRoutes         = require('./routes/auth');
 const profilRoutes       = require('./routes/profil');
 const publicationRoutes  = require('./routes/publications');
 const abonnementRoutes   = require('./routes/abonnements');
+const paiementRoutes     = require('./routes/paiement'); 
 const adminRoutes        = require('./routes/admin');
 const referentielRoutes  = require('./routes/referentiel');
 
@@ -49,8 +50,38 @@ app.use('/api/auth',         authRoutes);
 app.use('/api/profil',       profilRoutes);
 app.use('/api/publications',  publicationRoutes);
 app.use('/api/abonnements',  abonnementRoutes);
+app.use('/api/paiement',     paiementRoutes);
 app.use('/api/admin',        adminRoutes);
 app.use('/api',              referentielRoutes);
+
+// Ajouter avant les autres routes
+app.get('/api/proxy-image', async (req, res) => {
+  try {
+    let imageUrl = req.query.url;
+    if (!imageUrl) return res.status(400).json({ error: 'URL manquante' });
+    
+    // Réécrire l'URL publique (émulateur) en URL interne (backend)
+    // Le client envoie: http://10.0.2.2:9000/... 
+    // Le backend doit utiliser: http://localhost:9000/...
+    if (imageUrl.includes('10.0.2.2')) {
+      imageUrl = imageUrl.replace('10.0.2.2', 'localhost');
+      console.log('[proxy-image] URL réécrite:', imageUrl);
+    }
+    
+    const response = await fetch(imageUrl);
+    if (!response.ok) {
+      throw new Error(`MinIO retourna ${response.status}`);
+    }
+    
+    res.setHeader('Content-Type', response.headers.get('content-type'));
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    const buffer = Buffer.from(await response.arrayBuffer());
+    res.send(buffer);
+  } catch (err) {
+    console.error('[proxy-image] Erreur:', err.message);
+    res.status(500).json({ error: 'Erreur proxy', details: err.message });
+  }
+});
 
 // ── Health check ──────────────────────────────────────────
 app.get('/health', (req, res) => {

@@ -24,10 +24,13 @@ router.put('/signalements/:id',      ctrl.traiterSignalement);
 
 // Plans
 router.get('/plans',                 ctrl.listerPlans);
+router.post('/plans',                ctrl.creerPlan);    // créer un plan custom
 router.put('/plans/:id',             ctrl.modifierPlan);
+router.delete('/plans/:id',          ctrl.supprimerPlan);  // plans custom uniquement
 
 // Abonnements
-router.put('/abonnements/:id/ajuster', ctrl.ajusterAbonnement);
+router.put('/abonnements/:id/ajuster',  ctrl.ajusterAbonnement);
+router.post('/escorts/:id/cadeau',      ctrl.offrirCadeau);     // offrir un plan cadeau
 
 // Notifications
 router.post('/notifications/envoyer', ctrl.envoyerNotification);
@@ -38,5 +41,11 @@ router.get('/transactions',           ctrl.listerTransactions);
 // Publications
 router.get('/publications',                      ctrl.listerPublications);
 router.put('/publications/:id/statut',           ctrl.changerStatutPublication);
+
+// Analytics (graphiques dashboard)
+router.get('/analytics',                        ctrl.analytics);
+ 
+// Historique notifications envoyées
+router.get('/notifications/historique',         ctrl.historiqueNotifications);
 
 module.exports = router;

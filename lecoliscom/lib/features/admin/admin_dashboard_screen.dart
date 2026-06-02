@@ -3,17 +3,19 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+
 import '../../../core/constants/app_colors.dart';
 import '../../../core/models/admin_models.dart';
 import '../../../core/models/escort_model.dart';
+import '../../../core/models/abonnement_model.dart';
 import '../../../core/models/transaction_model.dart';
+import '../../../core/services/admin_service.dart';
+import 'admin_analytics_screen.dart'; 
 
 // ─────────────────────────────────────────────────────────
 // SECTIONS DU DASHBOARD
 // ─────────────────────────────────────────────────────────
-enum _AdminSection { comptes, signalements, notifications, abonnements }
-
-
+enum _AdminSection { analytiques, comptes, signalements, notifications, abonnements }
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -23,16 +25,82 @@ class AdminDashboardScreen extends StatefulWidget {
 }
 
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
-  _AdminSection _section = _AdminSection.comptes;
+  _AdminSection _section = _AdminSection.analytiques;
 
-  // Données (en prod → API Express)
-  List<CompteEscortAdmin> _comptes       = List.from(mockComptesAdmin);
-  List<SignalementAdmin>  _signalements  = List.from(mockSignalements);
-  List<PlanConfig>        _plansConfig   = List.from(mockPlansConfig);
+  // Service Backend
+  final AdminService _adminService = AdminService();
+  bool _isLoading = true;
+
+  // Stats du Dashboard
+  int totalEscorts = 0;
+  int escortsVerifies = 0;
+  int escortsBloques = 0;
+  double revenuTotal = 0.0;
+
+  // Données principales
+  List<CompteEscortAdmin> _comptes = [];
+  List<SignalementAdmin> _signalements = [];
+  List<PlanConfig> _plansConfig = [];
   final List<NotificationAdmin> _notifsSent = [];
 
-  // Recherche comptes
   String _searchComptes = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _recupererDonnees();
+  }
+
+  /// Charge toutes les données depuis le backend
+  Future<void> _recupererDonnees() async {
+    setState(() => _isLoading = true);
+
+    try {
+      // 1. Statistiques globales
+      final stats = await _adminService.getDashboardStats();
+      if (stats != null) {
+        totalEscorts = stats['totalEscorts'] ?? 0;
+        escortsVerifies = stats['escortsVerifies'] ?? 0;
+        escortsBloques = stats['escortsBloques'] ?? 0;
+        revenuTotal = (stats['revenuTotal'] ?? 0).toDouble();
+      }
+
+      // 2. Liste des comptes escorts
+      final escortsData = await _adminService.getEscorts();
+      _comptes = escortsData
+          .map((json) => CompteEscortAdmin.fromJson(json))
+          .toList();
+
+      // 3. Signalements
+      final signalementsData = await _adminService.getSignalements();
+      _signalements = signalementsData
+          .map((json) => SignalementAdmin.fromJson(json))
+          .toList();
+
+      // 4. Plans d'abonnement
+      final plansData = await _adminService.getPlans();
+      _plansConfig = plansData
+          .map((json) => PlanConfig.fromJson(json))
+          .toList();
+
+    } catch (e) {
+      print("Erreur lors du chargement des données admin : $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erreur de connexion au serveur'),
+            backgroundColor: Colors.red[700],
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
 
   List<CompteEscortAdmin> get _comptesFiltres => _comptes
       .where((c) =>
@@ -46,142 +114,262 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   // ── Navigation section ──────────────────────────────────
   Widget _buildNav(bool isWide) {
     final items = [
-      (_AdminSection.comptes,       Icons.people_rounded,          'Comptes'),
-      (_AdminSection.signalements,  Icons.flag_rounded,             'Signalements'),
-      (_AdminSection.notifications, Icons.notifications_rounded,    'Notifications'),
-      (_AdminSection.abonnements,   Icons.workspace_premium_rounded,'Abonnements'),
+      (_AdminSection.analytiques,   Icons.auto_graph_rounded,        'Analytiques'),
+      (_AdminSection.comptes,       Icons.people_alt_rounded,        'Comptes'),
+      (_AdminSection.signalements,  Icons.flag_rounded,              'Signalements'),
+      (_AdminSection.notifications, Icons.notifications_rounded,     'Notifications'),
+      (_AdminSection.abonnements,   Icons.workspace_premium_rounded, 'Abonnements'),
     ];
-
+ 
     if (isWide) {
-      // Rail latéral
       return Container(
-        width: 220,
+        width: 230,
         decoration: BoxDecoration(
-          color: AppColors.surface,
-          border: Border(right: BorderSide(color: AppColors.divider)),
+          color: const Color(0xFF111118),
+          border: Border(right: BorderSide(color: const Color(0xFF252535))),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 24),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              child: Row(children: [
-                const Icon(Icons.admin_panel_settings_rounded,
-                    color: AppColors.primaryPink, size: 22),
-                const SizedBox(width: 10),
-                Text('Admin', style: GoogleFonts.cormorantGaramond(
-                    fontSize: 20, fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimary)),
-              ]),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          // ── Logo / titre ──────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 28, 20, 20),
+            child: Row(children: [
+              Container(
+                width: 36, height: 36,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                      colors: [Color(0xFF9B5FFF), Color(0xFFFF4D8F)]),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.admin_panel_settings_rounded,
+                    color: Colors.white, size: 18),
+              ),
+              const SizedBox(width: 12),
+              ShaderMask(
+                shaderCallback: (b) => const LinearGradient(
+                    colors: [Color(0xFF9B5FFF), Color(0xFF00D4FF)])
+                    .createShader(b),
+                child: Text('LeColis',
+                    style: GoogleFonts.dmSerifDisplay(
+                        fontSize: 20, color: Colors.white)),
+              ),
+            ]),
+          ),
+          Container(height: 1, color: const Color(0xFF252535)),
+          const SizedBox(height: 10),
+ 
+          // ── Items ─────────────────────────────────────────
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              children: items.map((item) {
+                final sel   = _section == item.$1;
+                final badge = item.$1 == _AdminSection.signalements &&
+                    _nbSignalementsEnAttente > 0
+                    ? _nbSignalementsEnAttente
+                    : null;
+ 
+                return GestureDetector(
+                  onTap: () => setState(() => _section = item.$1),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    margin: const EdgeInsets.symmetric(vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 11),
+                    decoration: BoxDecoration(
+                      gradient: sel
+                        ? LinearGradient(colors: [
+                            const Color(0xFF9B5FFF).withOpacity(0.18),
+                            const Color(0xFF00D4FF).withOpacity(0.05),
+                          ])
+                        : null,
+                      borderRadius: BorderRadius.circular(12),
+                      border: sel
+                        ? Border.all(
+                            color: const Color(0xFF9B5FFF).withOpacity(0.3))
+                        : null,
+                    ),
+                    child: Row(children: [
+                      Icon(item.$2,
+                          size: 19,
+                          color: sel
+                              ? const Color(0xFF9B5FFF)
+                              : const Color(0xFF555570)),
+                      const SizedBox(width: 12),
+                      Expanded(child: Text(item.$3,
+                          style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: sel
+                                  ? FontWeight.w600
+                                  : FontWeight.w400,
+                              color: sel
+                                  ? const Color(0xFFF0F0FF)
+                                  : const Color(0xFF9090B0)))),
+                      if (badge != null)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 7, vertical: 2),
+                          decoration: BoxDecoration(
+                              color: const Color(0xFFFF4D4D),
+                              borderRadius: BorderRadius.circular(10)),
+                          child: Text('$badge',
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700)),
+                        ),
+                    ]),
+                  ),
+                );
+              }).toList(),
             ),
-            const Divider(height: 1),
-            const SizedBox(height: 8),
-            ...items.map((item) {
-              final sel = _section == item.$1;
+          ),
+ 
+          // ── Déconnexion ───────────────────────────────────
+          Container(height: 1, color: const Color(0xFF252535)),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: GestureDetector(
+              onTap: () {
+                AdminSession().deconnecter();
+                Navigator.popUntil(context, (r) => r.isFirst);
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFF4D4D).withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                      color: const Color(0xFFFF4D4D).withOpacity(0.2)),
+                ),
+                child: Row(children: [
+                  const Icon(Icons.logout_rounded,
+                      color: Color(0xFFFF4D4D), size: 16),
+                  const SizedBox(width: 10),
+                  const Text('Déconnexion',
+                      style: TextStyle(
+                          color: Color(0xFFFF4D4D),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500)),
+                ]),
+              ),
+            ),
+          ),
+        ]),
+      );
+    }
+ 
+    // ── Bottom nav mobile ────────────────────────────────────
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF111118),
+        border: Border(top: BorderSide(color: const Color(0xFF252535))),
+      ),
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 62,
+          child: Row(
+            children: items.map((item) {
+              final sel   = _section == item.$1;
               final badge = item.$1 == _AdminSection.signalements &&
                   _nbSignalementsEnAttente > 0
                   ? _nbSignalementsEnAttente
                   : null;
-              return GestureDetector(
-                onTap: () => setState(() => _section = item.$1),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: sel ? AppColors.primaryPink.withOpacity(0.12) : Colors.transparent,
-                    borderRadius: BorderRadius.circular(12),
-                    border: sel ? Border.all(color: AppColors.primaryPink.withOpacity(0.25)) : null,
+ 
+              return Expanded(
+                child: GestureDetector(
+                  onTap: () => setState(() => _section = item.$1),
+                  child: Container(
+                    color: Colors.transparent,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Stack(clipBehavior: Clip.none, children: [
+                          Icon(item.$2,
+                              size: 22,
+                              color: sel
+                                  ? const Color(0xFF9B5FFF)
+                                  : const Color(0xFF555570)),
+                          if (badge != null)
+                            Positioned(
+                              right: -6, top: -4,
+                              child: Container(
+                                padding: const EdgeInsets.all(3),
+                                decoration: const BoxDecoration(
+                                    color: Color(0xFFFF4D4D),
+                                    shape: BoxShape.circle),
+                                child: Text('$badge',
+                                    style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 7,
+                                        fontWeight: FontWeight.w700)),
+                              ),
+                            ),
+                        ]),
+                        const SizedBox(height: 3),
+                        Text(item.$3,
+                            style: TextStyle(
+                                fontSize: sel ? 10 : 9,
+                                fontWeight: sel
+                                    ? FontWeight.w600
+                                    : FontWeight.w400,
+                                color: sel
+                                    ? const Color(0xFF9B5FFF)
+                                    : const Color(0xFF555570))),
+                        if (sel)
+                          Container(
+                            margin: const EdgeInsets.only(top: 3),
+                            width: 18, height: 2,
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                  colors: [
+                                    Color(0xFF9B5FFF),
+                                    Color(0xFF00D4FF)
+                                  ]),
+                              borderRadius: BorderRadius.circular(1),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
-                  child: Row(children: [
-                    Icon(item.$2, size: 20,
-                        color: sel ? AppColors.primaryPink : AppColors.textMuted),
-                    const SizedBox(width: 12),
-                    Expanded(child: Text(item.$3,
-                        style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: sel ? FontWeight.w600 : FontWeight.w400,
-                            color: sel ? AppColors.textPrimary : AppColors.textMuted))),
-                    if (badge != null)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                        decoration: BoxDecoration(
-                            color: const Color(0xFFFF5252),
-                            borderRadius: BorderRadius.circular(10)),
-                        child: Text('$badge',
-                            style: const TextStyle(color: Colors.white,
-                                fontSize: 11, fontWeight: FontWeight.w700)),
-                      ),
-                  ]),
                 ),
               );
-            }),
-            const Spacer(),
-            // Déconnexion
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: GestureDetector(
-                onTap: () {
-                  AdminSession().deconnecter();
-                  Navigator.popUntil(context, (r) => r.isFirst);
-                },
-                child: Row(children: const [
-                  Icon(Icons.logout_rounded, color: Color(0xFFFF5252), size: 18),
-                  SizedBox(width: 10),
-                  Text('Déconnexion',
-                      style: TextStyle(color: Color(0xFFFF5252),
-                          fontSize: 13, fontWeight: FontWeight.w500)),
-                ]),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    // Bottom nav mobile
-    return BottomNavigationBar(
-      currentIndex: _AdminSection.values.indexOf(_section),
-      onTap: (i) => setState(() => _section = _AdminSection.values[i]),
-      backgroundColor: AppColors.surface,
-      selectedItemColor: AppColors.primaryPink,
-      unselectedItemColor: AppColors.textMuted,
-      type: BottomNavigationBarType.fixed,
-      selectedFontSize: 10,
-      unselectedFontSize: 10,
-      items: items.map((item) => BottomNavigationBarItem(
-        icon: badge_icon(item.$2,
-            item.$1 == _AdminSection.signalements ? _nbSignalementsEnAttente : 0),
-        label: item.$3,
-      )).toList(),
-    );
-  }
-
-  Widget badge_icon(IconData icon, int badge) {
-    return Stack(clipBehavior: Clip.none, children: [
-      Icon(icon),
-      if (badge > 0)
-        Positioned(
-          right: -6, top: -4,
-          child: Container(
-            padding: const EdgeInsets.all(3),
-            decoration: const BoxDecoration(
-                color: Color(0xFFFF5252), shape: BoxShape.circle),
-            child: Text('$badge',
-                style: const TextStyle(color: Colors.white, fontSize: 8)),
+            }).toList(),
           ),
         ),
-    ]);
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF0A0A0F),
+      body: Center(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          SizedBox(
+            width: 44, height: 44,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.5,
+              valueColor: AlwaysStoppedAnimation<Color>(
+                  const Color(0xFF9B5FFF).withOpacity(0.8)),
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text('Chargement…',
+              style: TextStyle(fontSize: 12, color: Color(0xFF555570))),
+        ]),
+      ),
+    );
+  }
+
     final w = MediaQuery.of(context).size.width;
     final isWide = w >= 900;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: const Color(0xFF0A0A0F),
       body: isWide
           ? Row(children: [
               _buildNav(true),
@@ -193,15 +381,20 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   Widget _buildContent() {
-    switch (_section) {
-      case _AdminSection.comptes:       return _buildComptes();
-      case _AdminSection.signalements:  return _buildSignalements();
-      case _AdminSection.notifications: return _buildNotifications();
-      case _AdminSection.abonnements:   return _buildAbonnements();
-    }
-  }
+     switch (_section) {
+       case _AdminSection.comptes:        return _buildComptes();
+       case _AdminSection.signalements:   return _buildSignalements();
+       case _AdminSection.notifications:  return _buildNotifications();
+       case _AdminSection.abonnements:    return _buildAbonnements();
+       case _AdminSection.analytiques:                           // ← AJOUTER
+         return AdminAnalyticsScreen(                           // ← AJOUTER
+           adminService: _adminService,                        // ← AJOUTER
+           comptes: _comptes,                                  // ← AJOUTER
+         );                                                    // ← AJOUTER
+     }
+   }
 
-  // ═══════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════
   // SECTION COMPTES
   // ═══════════════════════════════════════════════════════
   Widget _buildComptes() {
@@ -212,6 +405,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         _SectionHeader(
           titre: 'Comptes Escort',
           sous: '${_comptes.length} comptes enregistrés',
+          gradient: const [Color(0xFF9B5FFF), Color(0xFF00D4FF)]
+          
         ),
         // Recherche
         Padding(
@@ -260,72 +455,67 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => _DetailCompteSheet(
-        compte: compte,
-        onSanction: (type, motif, duree) =>
+        compte:      compte,
+        plansConfig: _plansConfig,          // ← liste des plans pour le cadeau
+        onCadeau:    (planId) => _offrirCadeau(compte, planId),
+        onSanction:  (type, motif, duree) =>
             _appliquerSanction(compte, type, motif, duree),
         onLeverSanction: () => _leverSanction(compte),
+        onVerifier:      () => _basculerVerification(compte),
       ),
     );
   }
 
-  void _appliquerSanction(
-      CompteEscortAdmin compte, TypeSanction type, String motif, int? jours) {
-    setState(() {
-      final index = _comptes.indexOf(compte);
-      final sanction = Sanction(
-        id:        'san_${DateTime.now().millisecondsSinceEpoch}',
-        escortId:  compte.escort.id,
-        type:      type,
-        motif:     motif,
-        dateDebut: DateTime.now(),
-        dateFin:   jours != null
-            ? DateTime.now().add(Duration(days: jours))
-            : null,
-        adminId: 'admin_001',
-      );
-      _comptes[index] = CompteEscortAdmin(
-        escort:          compte.escort,
-        abonnementActif: compte.abonnementActif,
-        transactions:    compte.transactions,
-        signalements:    compte.signalements,
-        sanctions:       [...compte.sanctions, sanction],
-        nbPublications:  compte.nbPublications,
-        nbVues:          compte.nbVues,
-        estBloque:       type == TypeSanction.blocageTemporaire,
-        estBanni:        type == TypeSanction.bannissement,
-      );
-    });
-    Navigator.pop(context);
-    _snack('Sanction appliquée : ${type.label}');
+  Future<void> _appliquerSanction(
+      CompteEscortAdmin compte, TypeSanction type, String motif, int? jours) async {
+    
+    // Conversion explicite vers les valeurs Prisma
+    //   avertissement     → AVERTISSEMENT
+    //   blocageTemporaire → BLOCAGE_TEMPORAIRE
+    //   bannissement      → BANNISSEMENT
+    String typeStr;
+    switch (type) {
+      case TypeSanction.avertissement:     typeStr = 'AVERTISSEMENT';     break;
+      case TypeSanction.blocageTemporaire: typeStr = 'BLOCAGE_TEMPORAIRE'; break;
+      case TypeSanction.bannissement:      typeStr = 'BANNISSEMENT';       break;
+    }
+
+    final success = await _adminService.sanctionnerEscort(
+      compte.escort.id,
+      typeStr,
+      motif,
+      dureeJours: jours,
+    );
+
+    if (success) {
+      await _recupererDonnees();
+      _snack('Sanction appliquée avec succès : ${type.label}');
+    } else {
+      _snack('Échec de l\'application de la sanction', isError: true);
+    }
   }
 
-  void _leverSanction(CompteEscortAdmin compte) {
-    setState(() {
-      final index = _comptes.indexOf(compte);
-      _comptes[index] = CompteEscortAdmin(
-        escort:          compte.escort,
-        abonnementActif: compte.abonnementActif,
-        transactions:    compte.transactions,
-        signalements:    compte.signalements,
-        sanctions:       compte.sanctions
-            .map((s) { s.active = false; return s; }).toList(),
-        nbPublications:  compte.nbPublications,
-        nbVues:          compte.nbVues,
-        estBloque: false, estBanni: false,
-      );
-    });
-    Navigator.pop(context);
-    _snack('Sanctions levées pour ${compte.escort.pseudo}');
+  Future<void> _leverSanction(CompteEscortAdmin compte) async {
+    final success = await _adminService.debloquerEscort(compte.escort.id);
+
+    if (success) {
+      await _recupererDonnees();
+      _snack('Sanctions levées pour ${compte.escort.pseudo}');
+    } else {
+      _snack('Échec du déblocage du compte', isError: true);
+    }
   }
 
-  // ═══════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════
   // SECTION SIGNALEMENTS
   // ═══════════════════════════════════════════════════════
   Widget _buildSignalements() {
     final enAttente = _signalements
-        .where((s) => s.statut == StatutSignalement.enAttente).toList();
+        .where((s) => s.statut == StatutSignalement.enAttente)
+        .toList();
     final traites = _signalements
-        .where((s) => s.statut != StatutSignalement.enAttente).toList();
+        .where((s) => s.statut != StatutSignalement.enAttente)
+        .toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -333,6 +523,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         _SectionHeader(
           titre: 'Signalements',
           sous: '$_nbSignalementsEnAttente en attente',
+          gradient: const [Color(0xFFFF6B6B), Color(0xFFFF4D8F)]
         ),
         Expanded(
           child: ListView(
@@ -342,8 +533,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 _SubHeader('En attente (${enAttente.length})'),
                 ...enAttente.map((s) => _SignalementCard(
                       sig: s,
-                      onTraiter:  () => _traiterSignalement(s, StatutSignalement.traite),
-                      onIgnorer:  () => _traiterSignalement(s, StatutSignalement.ignore),
+                      onTraiter: () => _traiterSignalement(s, StatutSignalement.traite),
+                      onIgnorer: () => _traiterSignalement(s, StatutSignalement.ignore),
                       onSanction: () {
                         final compte = _comptes.firstWhere(
                             (c) => c.escort.id == s.escortId,
@@ -357,9 +548,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 _SubHeader('Traités / Ignorés (${traites.length})'),
                 ...traites.map((s) => _SignalementCard(
                       sig: s,
-                      onTraiter: null,
-                      onIgnorer: null,
-                      onSanction: null,
+                      // Bouton "Rouvrir" → remet EN_ATTENTE pour révision
+                      onRouvrir: () => _traiterSignalement(
+                          s, StatutSignalement.enAttente),
                     )),
               ],
             ],
@@ -369,14 +560,26 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  void _traiterSignalement(SignalementAdmin sig, StatutSignalement statut) {
-    setState(() => sig.statut = statut);
-    _snack(statut == StatutSignalement.traite
-        ? 'Signalement marqué comme traité'
-        : 'Signalement ignoré');
-  }
+  /// Traiter un signalement via le backend
+  /// Gère les 3 cas : traite | ignore | enAttente (rouvrir pour révision)
+  Future<void> _traiterSignalement(
+      SignalementAdmin sig, StatutSignalement statut) async {
 
-  // ═══════════════════════════════════════════════════════
+    final success = await _adminService.traiterSignalement(sig.id, statut);
+
+    if (success) {
+      setState(() => sig.statut = statut);
+      final msg = statut == StatutSignalement.traite
+          ? 'Signalement marqué comme traité'
+          : statut == StatutSignalement.ignore
+              ? 'Signalement ignoré'
+              : 'Signalement rouvert pour révision';
+      _snack(msg);
+    } else {
+      _snack('Échec du traitement du signalement', isError: true);
+    }
+  }
+    // ═══════════════════════════════════════════════════════
   // SECTION NOTIFICATIONS
   // ═══════════════════════════════════════════════════════
   Widget _buildNotifications() {
@@ -386,39 +589,67 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         _SectionHeader(
           titre: 'Notifications',
           sous: 'Envoyer des messages aux escortes',
+          gradient: const [Color(0xFF9B5FFF), Color(0xFFFF4D8F)]
         ),
         Expanded(
           child: ListView(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
             children: [
-              // Formulaire envoi
+              // Formulaire d'envoi
               _NotifForm(
                 comptes: _comptes,
-                onEnvoyer: (titre, message, type, ids) {
-                  setState(() {
-                    _notifsSent.add(NotificationAdmin(
-                      id:       'notif_${DateTime.now().millisecondsSinceEpoch}',
-                      titre:    titre,
-                      message:  message,
-                      cible:    ids.isEmpty
-                          ? CibleNotification.tous
-                          : ids.length == 1
-                              ? CibleNotification.individuel
-                              : CibleNotification.multiple,
-                      escortIds: ids,
-                      dateEnvoi: DateTime.now(),
-                      type:     type,
-                    ));
-                  });
-                  _snack('Notification envoyée !');
+                onEnvoyer: (titre, message, typeNotif, ids) async {
+                  // .name retourne minuscule (ex: "admin") → on force majuscules
+                  // pour correspondre à l'enum Prisma (SYSTEME | ADMIN | ABONNEMENT | PUBLICATION)
+                  final typeStr = typeNotif.name.toUpperCase();
+                  final cible   = ids.isEmpty
+                      ? 'TOUS'
+                      : (ids.length == 1 ? 'INDIVIDUEL' : 'MULTIPLE');
+
+                  final success = await _adminService.envoyerNotification(
+                    titre:     titre,
+                    message:   message,
+                    type:      typeStr,
+                    cible:     cible,
+                    escortIds: ids.isEmpty ? null : ids,
+                  );
+
+                  if (success) {
+                    setState(() {
+                      _notifsSent.add(NotificationAdmin(
+                        id: 'notif_${DateTime.now().millisecondsSinceEpoch}',
+                        titre: titre,
+                        message: message,
+                        cible: ids.isEmpty
+                            ? CibleNotification.tous
+                            : ids.length == 1
+                                ? CibleNotification.individuel
+                                : CibleNotification.multiple,
+                        escortIds: List<String>.from(ids), // copie sécurisée
+                        dateEnvoi: DateTime.now(),
+                        type: typeNotif,
+                      ));
+                    });
+                    _snack('Notification envoyée avec succès !');
+                  } else {
+                    _snack('Échec de l\'envoi de la notification', isError: true);
+                  }
                 },
               ),
 
-              if (_notifsSent.isNotEmpty) ...[
-                const SizedBox(height: 24),
-                _SubHeader('Historique d\'envoi'),
-                ..._notifsSent.reversed.map((n) => _NotifSentCard(notif: n)),
-              ],
+              const SizedBox(height: 24),
+              _SubHeader('Historique d\'envoi'),
+              const SizedBox(height: 8),
+              TextButton.icon(
+                icon: const Icon(Icons.history_rounded, size: 16),
+                label: const Text('Voir l\'historique complet'),
+                style: TextButton.styleFrom(
+                foregroundColor: AppColors.primaryPink,
+                  textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+                onPressed: () => setState(() => _section = _AdminSection.analytiques),
+              ),
+   // L'historique complet est dans l'onglet Analytiques → Notifs envoyées
             ],
           ),
         ),
@@ -436,6 +667,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         _SectionHeader(
           titre: 'Gestion des abonnements',
           sous: 'Tarifs, durées et publications',
+          gradient: const [Color(0xFFFFB830), Color(0xFFFF6B6B)]
         ),
         Expanded(
           child: ListView(
@@ -445,17 +677,30 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               _SubHeader('Plans configurés (${_plansConfig.length})'),
               ..._plansConfig.map((plan) => _PlanConfigCard(
                     plan: plan,
-                    onSave: (p) => setState(() {
-                      final i = _plansConfig.indexWhere((x) => x.id == p.id);
-                      if (i != -1) _plansConfig[i] = p;
-                      _snack('Plan "${p.nom}" mis à jour');
-                    }),
+                    onSave: (p) async {
+                      final success = await _adminService.modifierPlan(p);
+                      if (success && mounted) {
+                        setState(() {
+                          final i = _plansConfig.indexWhere((x) => x.id == p.id);
+                          if (i != -1) _plansConfig[i] = p;
+                        });
+                        _snack('Plan "${p.nom}" mis à jour');
+                      } else {
+                        _snack('Échec de la mise à jour du plan', isError: true);
+                      }
+                    },
                     onSupprimer: plan.estBase
-                        ? null // les 3 plans de base ne peuvent pas être supprimés
-                        : () => setState(() {
-                              _plansConfig.removeWhere((x) => x.id == plan.id);
+                        ? null
+                        : () async {
+                            final result = await _adminService.supprimerPlan(plan.id);
+                            if (result['ok'] == true) {
+                              setState(() => _plansConfig.removeWhere((x) => x.id == plan.id));
                               _snack('Plan "${plan.nom}" supprimé');
-                            }),
+                            } else {
+                              _snack(result['message'] ?? 'Impossible de supprimer ce plan',
+                              isError: true);
+                            }
+                          },
                   )),
 
               // Bouton ajouter un plan custom
@@ -491,8 +736,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     (c) => _AbonnementClientCard(
                       compte: c,
                       plansConfig: _plansConfig,
-                      onModifier: (dateFin, nbPub) =>
-                          _modifierAbonnementClient(c, dateFin, nbPub),
+                      onModifier: (deltaJours, nbPub) =>
+                          _modifierAbonnementClient(c, deltaJours, nbPub),
+                      onCadeau: (planId) => _offrirCadeau(c, planId),
                     ),
                   ),
             ],
@@ -502,39 +748,108 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  void _modifierAbonnementClient(
-      CompteEscortAdmin compte, DateTime? dateFin, int? nbPub) {
-    setState(() {
-      final ab = compte.abonnementActif;
-      if (ab == null) return;
-      if (dateFin != null) ab.dateFin          = dateFin;
-      if (nbPub   != null) ab.nbPublicationsAdm = nbPub.clamp(1, 99);
-    });
-    _snack('Abonnement de ${compte.escort.pseudo} mis à jour');
+  // [deltaJours] : +1 ou -1 (ajustement un par un)
+  // [nbPub]       : nouveau quota de publications (null = pas de changement)
+  Future<void> _modifierAbonnementClient(
+      CompteEscortAdmin compte, int? deltaJours, int? nbPub) async {
+    final ab = compte.abonnementActif;
+    if (ab == null) return;
+
+    final result = await _adminService.ajusterAbonnement(
+      ab.id,
+      deltaJours:        deltaJours,
+      nbPublicationsAdm: nbPub,
+    );
+
+    if (result['ok'] == true) {
+      setState(() {
+        if (deltaJours != null) {
+          ab.dateFin = ab.dateFin.add(Duration(days: deltaJours));
+        }
+        if (nbPub != null) ab.nbPublicationsAdm = nbPub.clamp(1, 99);
+      });
+      _snack('Abonnement de ${compte.escort.pseudo} mis à jour');
+    } else {
+      _snack(result['message'] ?? 'Échec de la mise à jour', isError: true);
+    }
   }
 
+  // ── Offrir un plan cadeau ─────────────────────────────────
+  Future<void> _offrirCadeau(CompteEscortAdmin compte, String planId) async {
+    final success = await _adminService.offrirCadeau(
+      compte.escort.id,
+      planId: planId,
+    );
+    if (success) {
+      _snack('Plan cadeau offert à ${compte.escort.pseudo} 🎁');
+      await _recupererDonnees();
+    } else {
+      _snack("Échec de l'offre cadeau", isError: true);
+    }
+  }
   // ── Dialogue création d'un nouveau plan ──────────────────
   void _ouvrirDialogueNouveauPlan() {
     showDialog(
       context: context,
       builder: (_) => _NouveauPlanDialog(
-        onCreer: (plan) {
-          setState(() => _plansConfig.add(plan));
-          _snack('Plan "${plan.nom}" créé !');
-        },
+        onCreer: (plan) async {
+  // Convertir Color → hex pour l'API
+  final hex = '#${plan.accentColor.value.toRadixString(16).substring(2).toUpperCase()}';
+
+  final id = await _adminService.creerPlan(
+    nom:            plan.nom,
+    description:    plan.description ?? '',
+    prix:           plan.prix,
+    nbPublications: plan.nbPublications,
+    dureeJours:     plan.dureeJours,
+    avantages:      plan.avantages,
+    accentColor:    hex,
+  );
+
+  if (id != null) {
+    _snack('Plan "${plan.nom}" créé avec succès !');
+    // Recharger depuis le backend pour avoir les vrais IDs
+    final plansData = await _adminService.getPlans();
+    if (mounted) setState(() {
+      _plansConfig = plansData
+          .map((json) => PlanConfig.fromJson(json))
+          .toList();
+    });
+  } else {
+    _snack('Échec de la création du plan.', isError: true);
+  }
+},
       ),
     );
   }
 
-  void _snack(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg, style: const TextStyle(color: Colors.white)),
-      backgroundColor: AppColors.surface,
-      behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      margin: const EdgeInsets.all(16),
-      duration: const Duration(seconds: 2),
-    ));
+  Future<void> _basculerVerification(CompteEscortAdmin compte) async {
+    final nouvelEtat = !compte.escort.estVerifie;
+    final success = await _adminService.verifierEscort(
+      compte.escort.id,
+      estVerifie: nouvelEtat,
+    );
+    if (success) {
+      await _recupererDonnees();
+      _snack(nouvelEtat
+          ? '${compte.escort.pseudo} vérifié(e)'
+          : 'Vérification retirée pour ${compte.escort.pseudo}');
+    } else {
+      _snack('Échec de la mise à jour de la vérification', isError: true);
+    }
+  }
+
+    void _snack(String msg, {bool isError = false}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg, style: const TextStyle(color: Colors.white)),
+        backgroundColor: isError ? Colors.red[700] : AppColors.surface,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.all(16),
+        duration: const Duration(seconds: 3),
+      ),
+    );
   }
 }
 
@@ -543,20 +858,45 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 // ═════════════════════════════════════════════════════════
 
 class _SectionHeader extends StatelessWidget {
-  final String titre, sous;
-  const _SectionHeader({required this.titre, required this.sous});
-
+  final String       titre, sous;
+  final List<Color>  gradient;
+  final Widget?      action;
+ 
+  const _SectionHeader({
+    required this.titre,
+    required this.sous,
+    this.gradient = const [Color(0xFF9B5FFF), Color(0xFF00D4FF)],
+    this.action,
+  });
+ 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(titre, style: GoogleFonts.cormorantGaramond(
-            fontSize: 26, fontWeight: FontWeight.w700,
-            color: AppColors.textPrimary)),
-        const SizedBox(height: 4),
-        Text(sous, style: const TextStyle(
-            fontSize: 13, color: AppColors.textMuted)),
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 22, 16, 16),
+      decoration: const BoxDecoration(
+        color: Color(0xFF111118),
+        border: Border(
+            bottom: BorderSide(color: Color(0xFF252535))),
+      ),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Expanded(child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ShaderMask(
+              shaderCallback: (b) =>
+                  LinearGradient(colors: gradient).createShader(b),
+              child: Text(titre,
+                  style: GoogleFonts.dmSerifDisplay(
+                      fontSize: 26,
+                      color: Colors.white,
+                      letterSpacing: -0.3)),
+            ),
+            const SizedBox(height: 3),
+            Text(sous, style: const TextStyle(
+                fontSize: 12, color: Color(0xFF555570))),
+          ],
+        )),
+        if (action != null) action!,
       ]),
     );
   }
@@ -687,14 +1027,20 @@ class _CompteCard extends StatelessWidget {
 // DETAIL COMPTE (bottom sheet)
 // ─────────────────────────────────────────────────────────
 class _DetailCompteSheet extends StatefulWidget {
-  final CompteEscortAdmin compte;
+  final CompteEscortAdmin              compte;
+  final List<PlanConfig>               plansConfig;   // ← pour le cadeau
+  final void Function(String)          onCadeau;      // (planId)
   final void Function(TypeSanction, String, int?) onSanction;
   final VoidCallback onLeverSanction;
+  final VoidCallback onVerifier;
 
   const _DetailCompteSheet({
     required this.compte,
+    required this.plansConfig,
+    required this.onCadeau,
     required this.onSanction,
     required this.onLeverSanction,
+    required this.onVerifier,
   });
 
   @override
@@ -789,6 +1135,74 @@ class _DetailCompteSheetState extends State<_DetailCompteSheet> {
               ] else
                 const Text('Aucun abonnement actif',
                     style: TextStyle(color: AppColors.textMuted, fontSize: 13)),
+
+              // ── Offrir un plan cadeau (accessible même sans abonnement) ──
+              const SizedBox(height: 16),
+              _SheetSection(titre: 'Offrir un plan cadeau 🎁'),
+              const Text(
+                'Activez un plan pour ce compte sans paiement.',
+                style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+              ),
+              const SizedBox(height: 10),
+              ...widget.plansConfig.map((plan) => Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: GestureDetector(
+                  onTap: () {
+                    showDialog(
+                      context: context,
+                      builder: (_) => AlertDialog(
+                        backgroundColor: AppColors.surface,
+                        title: Text('Offrir le plan ${plan.nom} ?',
+                            style: const TextStyle(
+                                color: AppColors.textPrimary, fontSize: 16)),
+                        content: Text(
+                          'Cela activera "${plan.nom}" (${plan.dureeJours} jours) '
+                          'pour ${widget.compte.escort.pseudo} sans paiement.',
+                          style: const TextStyle(
+                              color: AppColors.textSecondary, fontSize: 13),
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context),
+                            child: const Text('Annuler',
+                                style: TextStyle(color: AppColors.textMuted)),
+                          ),
+                          TextButton(
+                            onPressed: () {
+                              Navigator.pop(context);
+                              widget.onCadeau(plan.id);
+                            },
+                            child: Text('Offrir',
+                                style: TextStyle(
+                                    color: plan.accentColor,
+                                    fontWeight: FontWeight.bold)),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: plan.accentColor.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: plan.accentColor.withOpacity(0.3)),
+                    ),
+                    child: Row(children: [
+                      Icon(plan.icone, color: plan.accentColor, size: 16),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(plan.nom,
+                          style: TextStyle(
+                              color: plan.accentColor,
+                              fontWeight: FontWeight.w600, fontSize: 13))),
+                      Text('${plan.dureeJours} jours',
+                          style: TextStyle(
+                              color: plan.accentColor.withOpacity(0.7),
+                              fontSize: 11)),
+                    ]),
+                  ),
+                ),
+              )),
 
               const SizedBox(height: 20),
 
@@ -892,6 +1306,17 @@ class _DetailCompteSheetState extends State<_DetailCompteSheet> {
               // ── Actions sanctions ──
               _SheetSection(titre: 'Actions'),
 
+              // Vérifier / dé-vérifier le compte
+              _ActionBtn(
+                label: e.estVerifie ? 'Retirer la vérification' : 'Vérifier le compte',
+                icon:  e.estVerifie
+                    ? Icons.remove_circle_outline_rounded
+                    : Icons.verified_rounded,
+                color: const Color(0xFF5DB8FF),
+                onTap: widget.onVerifier,
+              ),
+              const SizedBox(height: 8),
+
               if (c.estBloque || c.estBanni)
                 _ActionBtn(
                   label: 'Lever la sanction',
@@ -987,6 +1412,13 @@ class _DetailCompteSheetState extends State<_DetailCompteSheet> {
                       _typeSanction == TypeSanction.blocageTemporaire
                           ? _dureeJours : null,
                     );
+                    // Fermer le formulaire et nettoyer après soumission
+                    setState(() {
+                      _showSanctionForm = false;
+                      _motifCtrl.clear();
+                      _typeSanction = TypeSanction.avertissement;
+                      _dureeJours   = 7;
+                    });
                   },
                 ),
               ],
@@ -1002,19 +1434,29 @@ class _DetailCompteSheetState extends State<_DetailCompteSheet> {
 
 // ─────────────────────────────────────────────────────────
 // CARTE SIGNALEMENT
+// Affiche les actions selon le statut :
+//   EN_ATTENTE → Traité | Ignorer | Sanctionner
+//   TRAITE / IGNORE → bouton "Rouvrir" pour re-examiner
 // ─────────────────────────────────────────────────────────
 class _SignalementCard extends StatelessWidget {
   final SignalementAdmin sig;
-  final VoidCallback?    onTraiter;
-  final VoidCallback?    onIgnorer;
-  final VoidCallback?    onSanction;
+  final VoidCallback? onTraiter;
+  final VoidCallback? onIgnorer;
+  final VoidCallback? onSanction;
+  final VoidCallback? onRouvrir;   // ← nouveau : re-passer EN_ATTENTE
+
   const _SignalementCard({
     required this.sig,
-    this.onTraiter, this.onIgnorer, this.onSanction,
+    this.onTraiter,
+    this.onIgnorer,
+    this.onSanction,
+    this.onRouvrir,
   });
 
   @override
   Widget build(BuildContext context) {
+    final estEnAttente = sig.statut == StatutSignalement.enAttente;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(14),
@@ -1044,21 +1486,32 @@ class _SignalementCard extends StatelessWidget {
         ]),
         const SizedBox(height: 8),
         _Badge2('Motif', sig.motif, const Color(0xFFFFB800)),
+        if (sig.titrePublication != null) ...[
+          const SizedBox(height: 4),
+          _Badge2('Publication', sig.titrePublication!, const Color(0xFF5DB8FF)),
+        ],
         if (sig.description != null) ...[
           const SizedBox(height: 4),
           Text(sig.description!,
               style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
         ],
-        if (onTraiter != null) ...[
-          const SizedBox(height: 12),
+        const SizedBox(height: 12),
+        if (estEnAttente) ...[
+          // Actions principales
           Row(children: [
-            Expanded(child: _SmallBtn('Traité', const Color(0xFF25D366), onTraiter!)),
+            Expanded(child: _SmallBtn('Traité',
+                const Color(0xFF25D366), onTraiter ?? () {})),
             const SizedBox(width: 8),
-            Expanded(child: _SmallBtn('Ignorer', AppColors.textMuted, onIgnorer!)),
+            Expanded(child: _SmallBtn('Ignorer',
+                AppColors.textMuted, onIgnorer ?? () {})),
             const SizedBox(width: 8),
             Expanded(child: _SmallBtn('Sanctionner',
-                const Color(0xFFFF5252), onSanction!)),
+                const Color(0xFFFF5252), onSanction ?? () {})),
           ]),
+        ] else ...[
+          // Signalement déjà traité → bouton rouvrir
+          _SmallBtn('Rouvrir pour révision',
+              const Color(0xFFFFB800), onRouvrir ?? () {}),
         ],
       ]),
     );
@@ -1318,7 +1771,17 @@ class _PlanConfigCardState extends State<_PlanConfigCard> {
   late int         _nbPub;
   late int         _duree;
   late List<String> _avantages;
+  late Color       _couleur;       // ← AJOUT
   final _avantageCtrl = TextEditingController();
+  final _hexCtrl      = TextEditingController(); // ← AJOUT
+
+  // Palette de couleurs prédéfinies
+  static const List<Color> _palette = [
+    Color(0xFFFF5DA8), Color(0xFFFFB800), Color(0xFF8A8A9A),
+    Color(0xFFB68DFF), Color(0xFF5DB8FF), Color(0xFF25D366),
+    Color(0xFFFF6600), Color(0xFFFF5252), Color(0xFF00BCD4),
+    Color(0xFF9C27B0), Color(0xFF3F51B5), Color(0xFF009688),
+  ];
 
   @override
   void initState() {
@@ -1327,16 +1790,33 @@ class _PlanConfigCardState extends State<_PlanConfigCard> {
     _nbPub     = widget.plan.nbPublications;
     _duree     = widget.plan.dureeJours;
     _avantages = List.from(widget.plan.avantages);
+    _couleur   = widget.plan.accentColor; // ← AJOUT
+    _hexCtrl.text = _colorToHex(_couleur); // ← AJOUT
   }
 
   @override
   void dispose() {
     _avantageCtrl.dispose();
+    _hexCtrl.dispose(); // ← AJOUT
     super.dispose();
   }
 
-  // Utilise la couleur définie sur le plan (fonctionne pour plans custom)
-  Color get _color => widget.plan.accentColor;
+  // Convertit Color → hex sans le #
+  String _colorToHex(Color c) =>
+      c.value.toRadixString(16).substring(2).toUpperCase();
+
+  // Tente de parser un hex saisi manuellement
+  void _applyHex(String hex) {
+    final clean = hex.replaceAll('#', '').trim();
+    if (clean.length == 6) {
+      try {
+        final parsed = Color(int.parse('FF$clean', radix: 16));
+        setState(() => _couleur = parsed);
+      } catch (_) {}
+    }
+  }
+
+  Color get _color => _couleur; // ← utilise la couleur locale
 
   @override
   Widget build(BuildContext context) {
@@ -1398,7 +1878,7 @@ class _PlanConfigCardState extends State<_PlanConfigCard> {
                 label:    'Prix (FCFA)',
                 color:    _color,
                 value:    _prix.toInt(),
-                minVal:   1000,
+                minVal:   100,
                 maxVal:   10000000,
                 sliderMax: 500000,
                 suffixe:  'FCFA',
@@ -1438,6 +1918,113 @@ class _PlanConfigCardState extends State<_PlanConfigCard> {
               isInt:    true,
               onChanged: (v) => setState(() => _nbPub = v.toInt()),
             ),
+
+            const SizedBox(height: 16),
+
+            // ── COULEUR DU PLAN ──
+            Row(children: [
+              const Text('Couleur du plan',
+                  style: TextStyle(fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textSecondary)),
+              const Spacer(),
+              // Aperçu de la couleur sélectionnée
+              Container(
+                width: 24, height: 24,
+                decoration: BoxDecoration(
+                  color: _couleur,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white.withOpacity(0.3), width: 2),
+                  boxShadow: [BoxShadow(
+                    color: _couleur.withOpacity(0.4),
+                    blurRadius: 8,
+                  )],
+                ),
+              ),
+            ]),
+            const SizedBox(height: 10),
+
+            // Grille de couleurs
+            Wrap(
+              spacing: 8, runSpacing: 8,
+              children: _palette.map((c) {
+                final selected = _couleur.value == c.value;
+                return GestureDetector(
+                  onTap: () => setState(() {
+                    _couleur = c;
+                    _hexCtrl.text = _colorToHex(c);
+                  }),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 150),
+                    width: 32, height: 32,
+                    decoration: BoxDecoration(
+                      color: c,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: selected ? Colors.white : Colors.transparent,
+                        width: 2.5,
+                      ),
+                      boxShadow: selected ? [BoxShadow(
+                        color: c.withOpacity(0.55),
+                        blurRadius: 10,
+                        spreadRadius: 1,
+                      )] : null,
+                    ),
+                    child: selected
+                        ? const Icon(Icons.check_rounded,
+                            color: Colors.white, size: 16)
+                        : null,
+                  ),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 10),
+
+            // Champ hex manuel
+            Row(children: [
+              Container(
+                width: 20, height: 20,
+                margin: const EdgeInsets.only(right: 8),
+                decoration: BoxDecoration(
+                  color: _couleur,
+                  borderRadius: BorderRadius.circular(5),
+                ),
+              ),
+              Expanded(
+                child: TextField(
+                  controller: _hexCtrl,
+                  style: const TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: 12,
+                      fontFamily: 'monospace'),
+                  decoration: InputDecoration(
+                    hintText: 'Code hex (ex: FF5DA8)',
+                    hintStyle: const TextStyle(
+                        color: AppColors.textMuted, fontSize: 12),
+                    prefixText: '#  ',
+                    prefixStyle: TextStyle(
+                        color: _couleur,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12),
+                    filled: true,
+                    fillColor: AppColors.surfaceElevated,
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: const BorderSide(color: AppColors.divider)),
+                    enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: const BorderSide(color: AppColors.divider)),
+                    focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide(color: _couleur, width: 1.5)),
+                  ),
+                  onChanged: _applyHex,
+                  onSubmitted: _applyHex,
+                ),
+              ),
+            ]),
 
             const SizedBox(height: 16),
 
@@ -1549,6 +2136,7 @@ class _PlanConfigCardState extends State<_PlanConfigCard> {
                     widget.plan.nbPublications = _nbPub;
                     widget.plan.dureeJours     = _duree;
                     widget.plan.avantages      = List.from(_avantages);
+                    widget.plan.accentColor    = _couleur; // ← AJOUT
                     widget.onSave(widget.plan);
                     setState(() => _expanded = false);
                   },
@@ -1594,14 +2182,16 @@ class _PlanConfigCardState extends State<_PlanConfigCard> {
 // ABONNEMENT CLIENT (vue admin)
 // ─────────────────────────────────────────────────────────
 class _AbonnementClientCard extends StatefulWidget {
-  final CompteEscortAdmin compte;
-  final List<PlanConfig>  plansConfig;
-  final void Function(DateTime?, int?) onModifier;
+  final CompteEscortAdmin              compte;
+  final List<PlanConfig>               plansConfig;
+  final void Function(int?, int?)      onModifier; // (deltaJours, nbPub)
+  final void Function(String)          onCadeau;   // (planId)
 
   const _AbonnementClientCard({
     required this.compte,
     required this.plansConfig,
     required this.onModifier,
+    required this.onCadeau,
   });
 
   @override
@@ -1615,8 +2205,15 @@ class _AbonnementClientCardState extends State<_AbonnementClientCard> {
   Widget build(BuildContext context) {
     final ab  = widget.compte.abonnementActif!;
     final e   = widget.compte.escort;
-    widget.plansConfig.firstWhere(
-        (p) => p.nom == ab.plan.nom, orElse: () => widget.plansConfig.first);
+
+    // Trouver le PlanConfig correspondant — fallback sur le plan de l'abonnement
+    // si _plansConfig est vide ou pas encore chargé (évite Bad state: No element)
+    final planActuel = widget.plansConfig.isNotEmpty
+        ? widget.plansConfig.firstWhere(
+            (p) => p.nom == ab.plan.nom,
+            orElse: () => widget.plansConfig.first,
+          )
+        : null;
 
     final joursRestants = ab.dateFin.difference(DateTime.now()).inDays;
     final color = ab.plan.accentColor;
@@ -1674,25 +2271,22 @@ class _AbonnementClientCardState extends State<_AbonnementClientCard> {
                 value: '${widget.compte.nbPublications} / ${ab.nbPublicationsAdm}'),
             const SizedBox(height: 12),
 
-            // Prolonger / Réduire validité
-            Text('Ajuster l\'expiration',
-                style: const TextStyle(fontSize: 12,
-                    fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+            // Prolonger / Réduire validité (un jour à la fois — min 1 jour restant)
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+              Text('Ajuster l\'expiration',
+                  style: const TextStyle(fontSize: 12,
+                      fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+              Text('${ab.dateFin.difference(DateTime.now()).inDays} j restants',
+                  style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+            ]),
             const SizedBox(height: 8),
             Row(children: [
-              Expanded(child: _SmallBtn('-7j', const Color(0xFFFF5252), () {
-                widget.onModifier(
-                    ab.dateFin.subtract(const Duration(days: 7)), null);
+              Expanded(child: _SmallBtn('-1 jour', const Color(0xFFFF5252), () {
+                widget.onModifier(-1, null);  // backend vérifie le minimum
               })),
               const SizedBox(width: 8),
-              Expanded(child: _SmallBtn('+7j', const Color(0xFF25D366), () {
-                widget.onModifier(
-                    ab.dateFin.add(const Duration(days: 7)), null);
-              })),
-              const SizedBox(width: 8),
-              Expanded(child: _SmallBtn('+30j', const Color(0xFF25D366), () {
-                widget.onModifier(
-                    ab.dateFin.add(const Duration(days: 30)), null);
+              Expanded(child: _SmallBtn('+1 jour', const Color(0xFF25D366), () {
+                widget.onModifier(1, null);
               })),
             ]),
 
@@ -1712,6 +2306,72 @@ class _AbonnementClientCardState extends State<_AbonnementClientCard> {
                 widget.onModifier(null, ab.nbPublicationsAdm + 1);
               })),
             ]),
+
+            // ── Offrir un plan cadeau ─────────────────────
+            const SizedBox(height: 16),
+            Divider(color: AppColors.divider.withOpacity(0.5)),
+            const SizedBox(height: 12),
+            Text('Offrir un plan cadeau 🎁',
+                style: const TextStyle(fontSize: 12,
+                    fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+            const SizedBox(height: 8),
+            // Liste déroulante des plans disponibles
+            ...widget.plansConfig.map((plan) => Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: GestureDetector(
+                onTap: () {
+                  // Confirmation avant d'offrir
+                  showDialog(
+                    context: context,
+                    builder: (_) => AlertDialog(
+                      backgroundColor: AppColors.surface,
+                      title: Text('Offrir le plan ${plan.nom} ?',
+                          style: const TextStyle(color: AppColors.textPrimary, fontSize: 16)),
+                      content: Text(
+                        'Cela activera le plan "${plan.nom}" '
+                        '(${plan.dureeJours} jours) pour '
+                        '${widget.compte.escort.pseudo} sans paiement.',
+                        style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('Annuler',
+                              style: TextStyle(color: AppColors.textMuted)),
+                        ),
+                        TextButton(
+                          onPressed: () {
+                            Navigator.pop(context);
+                            widget.onCadeau(plan.id);
+                          },
+                          child: Text('Offrir',
+                              style: TextStyle(color: plan.accentColor,
+                                  fontWeight: FontWeight.bold)),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                  decoration: BoxDecoration(
+                    color: plan.accentColor.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: plan.accentColor.withOpacity(0.3)),
+                  ),
+                  child: Row(children: [
+                    Icon(plan.icone, color: plan.accentColor, size: 16),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(plan.nom,
+                        style: TextStyle(color: plan.accentColor,
+                            fontWeight: FontWeight.w600, fontSize: 13))),
+                    Text('${plan.dureeJours}j',
+                        style: TextStyle(color: plan.accentColor.withOpacity(0.7),
+                            fontSize: 11)),
+                  ]),
+                ),
+              ),
+            )),
           ]),
         ),
       ]),
@@ -2055,7 +2715,7 @@ class _NouveauPlanDialogState extends State<_NouveauPlanDialog> {
               label:    'Prix (FCFA)',
               color:    selectedColor,
               value:    _prix.toInt(),
-              minVal:   1000,
+              minVal:   100,
               maxVal:   10000000,
               sliderMax: 500000,
               suffixe:  'FCFA',

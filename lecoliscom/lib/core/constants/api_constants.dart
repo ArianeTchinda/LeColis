@@ -32,9 +32,9 @@ class ApiConstants {
   static String get logout   => '$baseUrl/auth/logout';
 
   // ── Reset mot de passe (3 étapes) ────────────────────────
-  static String get motDePasseOublie  => '$baseUrl/auth/mot-de-passe-oublie';
-  static String get verifierCode      => '$baseUrl/auth/verifier-code';
-  static String get reinitialiserMdp  => '$baseUrl/auth/reinitialiser-mdp';
+  static String get motDePasseOublie   => '$baseUrl/auth/mot-de-passe-oublie';
+  static String get verifierCode       => '$baseUrl/auth/verifier-code';
+  static String get reinitialiserMdp   => '$baseUrl/auth/reinitialiser-mdp';
 
   // ── Profil ───────────────────────────────────────────────
   static String get profil                  => '$baseUrl/profil';
@@ -45,13 +45,24 @@ class ApiConstants {
   static String get profilAbonnement        => '$baseUrl/profil/abonnement';
   static String get profilHistorique        => '$baseUrl/profil/historique-abonnements';
   static String get profilPublications      => '$baseUrl/profil/publications';
+  static String profilPublicationStats(String id) => '$baseUrl/profil/publications/$id/stats';
+  static String profilPublicationAvis(String id)  => '$baseUrl/profil/publications/$id/avis';
 
   // ── Publications publiques ───────────────────────────────
   static String get publications => '$baseUrl/publications';
+  static String publicationDetail(String id) => '$baseUrl/publications/$id';
+  static String publicationAvis(String id)   => '$baseUrl/publications/$id/avis';
+  static String publicationSignaler(String id) => '$baseUrl/publications/$id/signaler';
 
   // ── Abonnements ──────────────────────────────────────────
   static String get abonnementPlans     => '$baseUrl/abonnements/plans';
   static String get abonnementSouscrire => '$baseUrl/abonnements/souscrire';
+
+  // ── Paiement TaraMoney ───────────────────────────────────
+  static String get paiementCreerLien   => '$baseUrl/paiement/creer-lien';
+  static String get paiementWebhook     => '$baseUrl/paiement/webhook';
+  static String paiementStatut(String transactionId) =>
+      '$baseUrl/paiement/statut/$transactionId';
 
   // ── Référentiel ──────────────────────────────────────────
   static String get localisationPays      => '$baseUrl/localisation/pays';

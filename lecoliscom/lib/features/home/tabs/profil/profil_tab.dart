@@ -12,7 +12,8 @@ import 'widgets/register_screen.dart';
 import 'screens/profil_dashboard_screen.dart';
 
 class ProfilTab extends StatefulWidget {
-  const ProfilTab({super.key});
+  final void Function(int)? onGoToAbonnement;
+  const ProfilTab({super.key, this.onGoToAbonnement});
 
   @override
   State<ProfilTab> createState() => _ProfilTabState();
@@ -41,6 +42,7 @@ class _ProfilTabState extends State<ProfilTab> {
       return ProfilDashboard(
         escort:       _session.escort!,
         onDeconnexion: () => _session.deconnecter(),
+        onGoToAbonnement: widget.onGoToAbonnement,
       );
     }
 

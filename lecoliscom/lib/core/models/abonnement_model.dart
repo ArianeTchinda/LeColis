@@ -2,7 +2,7 @@
 
 import 'package:flutter/material.dart';
 
-/// Définit les caractéristiques d'un forfait (Basique, Standard, Premium)
+// Définit les caractéristiques d'un forfait (Basique, Standard, Premium)
 class PlanAbonnement {
   final String     id;
   final String     nom;
@@ -13,6 +13,7 @@ class PlanAbonnement {
   final List<String> avantages;
   final Color      accentColor;
   final IconData   icone;
+  final bool       estBasique;
 
   const PlanAbonnement({
     required this.id,
@@ -24,11 +25,12 @@ class PlanAbonnement {
     required this.avantages,
     required this.accentColor,
     required this.icone,
+    this.estBasique = false,
   });
 
-  /// Construit depuis la réponse JSON du backend
-  /// Champs backend : id, nom, description, prix, nbPublications,
-  ///                  dureeJours, avantages (JSON array), accentColor (hex)
+  // Construit depuis la réponse JSON du backend
+  // Champs backend : id, nom, description, prix, nbPublications,
+  //                  dureeJours, avantages (JSON array), accentColor (hex)
   factory PlanAbonnement.fromJson(Map<String, dynamic> j) {
     // Convertit la couleur hex "#FF5DA8" → Color
     Color parseColor(String? hex) {
@@ -61,11 +63,12 @@ class PlanAbonnement {
       avantages:      avantages,
       accentColor:    parseColor(j['accentColor']),
       icone:          parseIcone(j['nom'] ?? ''),
+      estBasique:     j['estBasique'] ?? j['est_base'] ?? false,
     );
   }
 }
 
-/// Définit un abonnement souscrit par un utilisateur
+// Définit un abonnement souscrit par un utilisateur
 class AbonnementSouscrit {
   final String       id;
   final PlanAbonnement plan;
@@ -73,10 +76,10 @@ class AbonnementSouscrit {
   DateTime           dateFin;       // mutable : l'admin peut ajuster
   final String       statut;        // 'ACTIF' | 'EXPIRE'
 
-  /// Quota ajusté par l'admin. Vient de quotaTotal dans la réponse API.
+  // Quota ajusté par l'admin. Vient de quotaTotal dans la réponse API.
   int nbPublicationsAdm;
 
-  /// Champs enrichis renvoyés par GET /profil/abonnement
+  // Champs enrichis renvoyés par GET /profil/abonnement
   final int quotaTotal;
   final int quotaUtilise;
   final int quotaRestant;
@@ -99,9 +102,9 @@ class AbonnementSouscrit {
   int get joursRestants =>
       dateFin.difference(DateTime.now()).inDays.clamp(0, 9999);
 
-  /// Construit depuis la réponse de GET /profil/abonnement
-  /// Le backend renvoie : { abonnement: { id, plan:{...}, dateFin,
-  ///   statut, quotaTotal, quotaUtilise, quotaRestant, createdAt } }
+  // Construit depuis la réponse de GET /profil/abonnement
+  // Le backend renvoie : { abonnement: { id, plan:{...}, dateFin,
+  //   statut, quotaTotal, quotaUtilise, quotaRestant, createdAt } }
   factory AbonnementSouscrit.fromJson(Map<String, dynamic> j) {
     return AbonnementSouscrit(
       id:               j['id'],

@@ -156,6 +156,7 @@ enum StatutAbonnement {
   ACTIF
   EXPIRE
   ANNULE
+  ATTENTE_ACTIVATION
 }
 
 model Abonnement {
@@ -171,7 +172,9 @@ model Abonnement {
   createdAt           DateTime          @default(now())
   updatedAt           DateTime          @updatedAt
 
-  transaction         Transaction?
+  // ── Ajout TaraMoney : lien vers la transaction qui a créé cet abonnement ──
+  transactionId       String?           @unique
+  transaction         Transaction?      @relation("AbonnementTransaction", fields: [transactionId], references: [id])
 
   @@map("abonnements")
 }
@@ -190,16 +193,21 @@ model Transaction {
   id               String             @id @default(cuid())
   escortId         String
   escort           Escort             @relation(fields: [escortId], references: [id], onDelete: Cascade)
-  abonnementId     String?            @unique
-  abonnement       Abonnement?        @relation(fields: [abonnementId], references: [id])
+
+  // ── Ajout TaraMoney : la relation est maintenant portée par Abonnement ──
+  abonnement       Abonnement?        @relation("AbonnementTransaction")
+
   planNom          String             // snapshot du nom du plan au moment du paiement
   montant          Float
-  methodePaiement  String             // "MTN MoMo", "Orange Money", etc.
+  methodePaiement  String             // "TaraMoney", "MTN MoMo", etc.
   statut           StatutTransaction  @default(EN_ATTENTE)
-  referenceExterne String?            // référence retournée par l'opérateur
+
+  // ── Remplace referenceExterne — stocke le generalLink TaraMoney ──
+  taraRef          String?            // lien générique TaraMoney pour matching webhook
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
 
+  @@index([taraRef])                  // accès rapide dans le webhook
   @@map("transactions")
 }
 

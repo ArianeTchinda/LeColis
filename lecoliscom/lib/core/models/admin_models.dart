@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'escort_model.dart';
 import 'abonnement_model.dart';
 import 'transaction_model.dart';
+import '../services/admin_service.dart';
 
 // ─────────────────────────────────────────────────────────
 // SESSION ADMIN (singleton)
@@ -13,23 +14,35 @@ class AdminSession extends ChangeNotifier {
   factory AdminSession() => _instance;
   AdminSession._internal();
 
-  bool _connecte = false;
-  bool get estConnecte => _connecte;
+  final AdminService _service = AdminService();
 
-  // En prod : vérifier le token JWT admin via POST /admin/login
+  bool    _connecte = false;
+  String? _erreur;
+  Map<String, dynamic>? _admin; // { id, email, nom }
+
+  bool    get estConnecte => _connecte;
+  String? get erreur      => _erreur;
+  Map<String, dynamic>? get admin => _admin;
+
   Future<bool> connecter(String email, String motDePasse) async {
-    await Future.delayed(const Duration(seconds: 1));
-    // Mock : identifiants hardcodés — en prod, appel API
-    if (email == 'admin@lecolis.com' && motDePasse == 'Admin@2025!') {
+    _erreur = null;
+    final res = await _service.login(email, motDePasse);
+    if (res['success'] == true) {
       _connecte = true;
+      _admin    = res['admin'] as Map<String, dynamic>?;
       notifyListeners();
       return true;
     }
+    _erreur = res['message'] ?? 'Identifiants incorrects.';
+    notifyListeners();
     return false;
   }
 
-  void deconnecter() {
+  Future<void> deconnecter() async {
+    await _service.logout();
     _connecte = false;
+    _admin    = null;
+    _erreur   = null;
     notifyListeners();
   }
 }
@@ -122,6 +135,8 @@ class SignalementAdmin {
   final String  escortPseudo;
   final String  motif;
   final String? description;
+  // Titre de la publication signalée (null si le signalement est direct sur le compte)
+  final String? titrePublication;
   final DateTime date;
   StatutSignalement statut;
 
@@ -129,11 +144,44 @@ class SignalementAdmin {
     required this.id,
     required this.escortId,
     required this.escortPseudo,
-    required this.motif,
     this.description,
+    this.titrePublication,
+    required this.motif,
     required this.date,
     this.statut = StatutSignalement.enAttente,
   });
+
+  /// Le backend renvoie :
+  /// { id, motif, description, statut, createdAt,
+  ///   escortSignalee: { id, pseudo, photoUrl },
+  ///   publication: { id, titre } | null }
+  factory SignalementAdmin.fromJson(Map<String, dynamic> j) {
+    StatutSignalement parseStatut(String? s) {
+      switch ((s ?? '').toUpperCase()) {
+        case 'TRAITE':    return StatutSignalement.traite;
+        case 'IGNORE':    return StatutSignalement.ignore;
+        case 'EN_ATTENTE':
+        default:          return StatutSignalement.enAttente;
+      }
+    }
+
+    final escortSignalee  = j['escortSignalee']  as Map<String, dynamic>? ?? {};
+    final publicationData = j['publication']      as Map<String, dynamic>?;
+
+    return SignalementAdmin(
+      id:                j['id']?.toString() ?? '',
+      escortId:          escortSignalee['id']?.toString()
+                         ?? j['escortId']?.toString() ?? '',
+      escortPseudo:      escortSignalee['pseudo']
+                         ?? j['escortPseudo'] ?? 'Inconnu',
+      motif:             j['motif'] ?? '',
+      description:       j['description'],
+      // Titre de la publication si le signalement porte sur une publication
+      titrePublication:  publicationData?['titre'],
+      date:              DateTime.tryParse(j['createdAt'] ?? '') ?? DateTime.now(),
+      statut:            parseStatut(j['statut']),
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────
@@ -161,6 +209,75 @@ class CompteEscortAdmin {
     this.estBloque      = false,
     this.estBanni       = false,
   });
+
+  /// Le backend (GET /admin/escorts) renvoie les champs à plat :
+  /// { id, pseudo, email, telephone, photoUrl, estVerifie, estBloque,
+  ///   estBanni, createdAt,
+  ///   abonnementActif: { id, plan:{...}, dateFin, statut, createdAt,
+  ///                      nbPublicationsAdm } | null,
+  ///   stats: { publications: N, transactions: N, signalements: N, vues: N } }
+  factory CompteEscortAdmin.fromJson(Map<String, dynamic> j) {
+    // ── EscortModel — champs à plat (pas d'objet imbriqué ici) ──
+    final escort = EscortModel.fromJsonAdmin(j);
+
+    // ── Abonnement actif ──
+    AbonnementSouscrit? abonnement;
+    final abData = j['abonnementActif'];
+    if (abData != null) {
+      try {
+        // Le backend n'envoie pas quotaUtilise/quotaRestant ici
+        // On construit un AbonnementSouscrit minimal
+        abonnement = AbonnementSouscrit(
+          id:               abData['id']?.toString() ?? '',
+          plan:             PlanAbonnement.fromJson(abData['plan'] as Map<String, dynamic>),
+          dateDebut:        DateTime.tryParse(abData['createdAt'] ?? '') ?? DateTime.now(),
+          dateFin:          DateTime.tryParse(abData['dateFin'] ?? '') ?? DateTime.now(),
+          statut:           abData['statut'] ?? 'ACTIF',
+          nbPublicationsAdm: abData['nbPublicationsAdm'],
+          quotaTotal:       abData['nbPublicationsAdm'] ?? 0,
+          quotaUtilise:     0,
+          quotaRestant:     abData['nbPublicationsAdm'] ?? 0,
+        );
+      } catch (_) {
+        abonnement = null;
+      }
+    }
+
+    // ── Stats (à plat dans stats:{}) ──
+    final stats          = j['stats'] as Map<String, dynamic>? ?? {};
+    final nbPublications = (stats['publications'] ?? 0) as int;
+    final nbVues         = (stats['vues']         ?? 0) as int;
+    final nbSignalements = (stats['signalements'] ?? 0) as int;
+
+    // On construit des SignalementAdmin "résumés" à partir du compteur stats.
+    // Les données complètes (motif, description, publication) sont chargées
+    // dans la section Signalements (GET /admin/signalements?escortId=...).
+    // Ici on génère des entrées synthétiques pour afficher le badge sur la carte.
+    // Le champ escortPseudo est connu depuis l'escort, escortId idem.
+    final signalementsResumes = List.generate(
+      nbSignalements,
+      (i) => SignalementAdmin(
+        id:           '${j['id']}_sig_$i',   // ID synthétique (non utilisé pour actions)
+        escortId:     j['id']?.toString() ?? '',
+        escortPseudo: j['pseudo'] ?? '',
+        motif:        'Signalement',          // motif générique — détail dans la section Signalements
+        statut:       StatutSignalement.enAttente,
+        date:         DateTime.now(),
+      ),
+    );
+
+    return CompteEscortAdmin(
+      escort:          escort,
+      abonnementActif: abonnement,
+      transactions:    const [],            // chargées au détail uniquement
+      signalements:    signalementsResumes, // ← compte les signalements pour le badge
+      sanctions:       const [],
+      nbPublications:  nbPublications,
+      nbVues:          nbVues,
+      estBloque:       j['estBloque'] ?? false,
+      estBanni:        j['estBanni']  ?? false,
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────
@@ -170,14 +287,14 @@ class PlanConfig {
   final String id;
   final String nom;
   final bool   estBasique;
-  final bool   estBase;       // ← AJOUTER (true = basique/standard/premium non supprimables)
+  final bool   estBase;
   double       prix;
   int          nbPublications;
   int          dureeJours;
-  final Color      accentColor;  // ← AJOUTER
-  final IconData   icone;        // ← AJOUTER
-  final String?    description;  // ← AJOUTER
-  List<String>     avantages;    // ← AJOUTER
+  Color        accentColor;  // mutable — modifiable par l'admin
+  final IconData   icone;
+  final String?    description;
+  List<String>     avantages;
 
   PlanConfig({
     required this.id,
@@ -192,6 +309,45 @@ class PlanConfig {
     this.description,
     this.avantages   = const [],
   });
+
+  /// Le backend (GET /admin/plans) renvoie le modèle Prisma PlanAbonnement :
+  /// { id, nom, description, prix, nbPublications, dureeJours,
+  ///   avantages (JSON array), accentColor (hex), estBasique, actif, ordre }
+  factory PlanConfig.fromJson(Map<String, dynamic> j) {
+    Color parseColor(String? hex) {
+      if (hex == null || hex.isEmpty) return const Color(0xFF8A8A9A);
+      final h = hex.replaceAll('#', '');
+      try { return Color(int.parse('FF$h', radix: 16)); }
+      catch (_) { return const Color(0xFF8A8A9A); }
+    }
+
+    IconData parseIcone(String nom) {
+      switch (nom.toLowerCase()) {
+        case 'premium':  return Icons.workspace_premium_rounded;
+        case 'standard': return Icons.verified_outlined;
+        default:         return Icons.star_outline_rounded;
+      }
+    }
+
+    final avantagesRaw = j['avantages'];
+    final avantages = avantagesRaw is List
+        ? avantagesRaw.map((e) => e.toString()).toList()
+        : <String>[];
+
+    return PlanConfig(
+      id:             j['id']?.toString() ?? '',
+      nom:            j['nom'] ?? '',
+      estBasique:     j['estBasique'] ?? false,
+      estBase: ['Basique', 'Standard', 'Premium'].contains(j['nom']),
+      prix:           (j['prix'] ?? 0).toDouble(),
+      nbPublications: j['nbPublications'] ?? 1,
+      dureeJours:     j['dureeJours'] ?? 7,
+      accentColor:    parseColor(j['accentColor']),
+      icone:          parseIcone(j['nom'] ?? ''),
+      description:    j['description'],
+      avantages:      avantages,
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────

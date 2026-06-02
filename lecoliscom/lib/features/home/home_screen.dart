@@ -5,6 +5,7 @@ import 'widgets/custom_bottom_nav.dart';
 import 'tabs/publications/publications_tab.dart';
 import 'tabs/abonnements/abonnements_tab.dart';
 import 'tabs/profil/profil_tab.dart';
+import 'dart:async'; // Nécessaire pour le Timer
 import '../../core/constants/app_colors.dart';
 import '/core/models/escort_model.dart'; // ← NOUVEAU : pour écouter la session
 
@@ -17,16 +18,25 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateMixin {
   int _currentIndex = 0;
+  int _abonnementTabIndex = 0; // index de l'onglet interne d'AbonnementsTab à ouvrir
   bool _searchOpen = false;
   final TextEditingController _searchCtrl = TextEditingController();
   final ValueNotifier<String> _searchQuery = ValueNotifier('');
   bool _ageVerified = false;
+
+  // Variables pour le "Glitch" Admin
+  int _glitchTaps = 0;
+  bool _isWaitingForFinalTap = false;
+  bool _isTimerRunning = false;
+ Timer? _glitchTimer;
 
   // ← NOUVEAU : session globale pour l'avatar dans le header
   final SessionManager _session = SessionManager();
 
   late final AnimationController _fadeCtrl;
   late final Animation<double> _fadeAnim;
+
+  
 
   @override
   void initState() {
@@ -133,10 +143,72 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     });
   }
 
-  /// ← NOUVEAU : basculer sur l'onglet Profil (index 2), utilisé par AbonnementsTab
+  void _handleLogoTap() {
+  // Si on est déjà prêt pour le clic final
+  if (_isWaitingForFinalTap) {
+    _resetGlitch();
+    // Accès à l'écran admin
+    Navigator.pushNamed(context, '/lecolis-admin-2025');
+    return;
+  }
+
+  // Si on clique pendant qu'on est censé attendre 3s -> on réinitialise (échec)
+  if (_isTimerRunning) {
+    _resetGlitch();
+    return;
+  }
+
+  setState(() {
+    _glitchTaps++;
+  });
+
+  // Si on atteint les 5 clics
+  if (_glitchTaps == 5) {
+    setState(() {
+      _isTimerRunning = true;
+    });
+
+    // On lance le timer d'attente de 3 secondes
+    _glitchTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) {
+        setState(() {
+          _isTimerRunning = false;
+          _isWaitingForFinalTap = true;
+        });
+        
+        // Fenêtre de tir de 2 secondes pour faire le clic final, 
+        // sinon ça expire pour plus de sécurité
+        _glitchTimer = Timer(const Duration(seconds: 2), () {
+          if (mounted && _isWaitingForFinalTap) {
+            _resetGlitch();
+          }
+        });
+      }
+    });
+  }
+}
+
+void _resetGlitch() {
+  _glitchTimer?.cancel();
+  setState(() {
+    _glitchTaps = 0;
+    _isTimerRunning = false;
+    _isWaitingForFinalTap = false;
+  });
+}
+
+  // Basculer sur l'onglet Profil (index 2)
   void _goToProfilTab() {
     _onTabTap(2);
   }
+
+  // Basculer sur l'onglet Abonnements (index 1) + ouvrir un onglet interne
+void _goToAbonnement(int tabIndex) {
+  setState(() {
+    _currentIndex = 1;          // Change l'onglet principal vers "Abonnements"
+    _abonnementTabIndex = tabIndex; // 0 pour Plans, 1 pour Mon Abonnement
+  });
+}
 
   @override
   Widget build(BuildContext context) {
@@ -203,24 +275,30 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         child: Row(
           children: [
             // Logo
-            if (!_searchOpen || _currentIndex == 2)
-              SizedBox(
-                height: logoHeight,
-                width: isDesktop ? 300 : 200,
-                child: OverflowBox(
-                  maxWidth: double.infinity,
-                  alignment: Alignment.centerLeft,
-                  child: Transform.scale(
-                    scale: 2.5,
-                    alignment: Alignment.centerLeft,
-                    child: SvgPicture.asset(
-                      'assets/logos/lecolis_logo.svg',
-                      fit: BoxFit.contain,
-                      alignment: Alignment.centerLeft,
-                    ),
-                  ),
-                ),
-              ),
+            // Dans _buildHeader...
+if (!_searchOpen || _currentIndex == 2)
+  SizedBox(
+    height: logoHeight,
+    width: isDesktop ? 300 : 200,
+    child: OverflowBox(
+      maxWidth: double.infinity,
+      alignment: Alignment.centerLeft,
+      child: Transform.scale(
+        scale: 2.5,
+        alignment: Alignment.centerLeft,
+        // ENTOURER LE LOGO ICI
+        child: GestureDetector(
+          onTap: _handleLogoTap, // Appel de notre logique
+          behavior: HitTestBehavior.opaque, // Pour bien capturer le clic
+          child: SvgPicture.asset(
+            'assets/logos/lecolis_logo.svg',
+            fit: BoxFit.contain,
+            alignment: Alignment.centerLeft,
+          ),
+        ),
+      ),
+    ),
+  ),
 
             // Barre de recherche (hors tab Profil)
             if (_searchOpen && _currentIndex != 2)
@@ -249,7 +327,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
-  /// ← NOUVEAU : petit avatar circulaire avec photo ou initiale
+  // ← NOUVEAU : petit avatar circulaire avec photo ou initiale
   Widget _buildAvatarChip() {
     final escort = _session.escort;
     final String initiale = (escort?.pseudo.isNotEmpty == true)
@@ -331,10 +409,14 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       case 0: return PublicationsTab(searchQuery: _searchQuery);
       // ← MODIFIÉ : on passe onGoToLogin au tab Abonnements
       case 1: return AbonnementsTab(
+          key: ValueKey(_abonnementTabIndex), // force rebuild si index change
           searchQuery: _searchQuery,
           onGoToLogin: _goToProfilTab,
+          initialTabIndex: _abonnementTabIndex,
         );
-      case 2: return const ProfilTab();
+      case 2: return ProfilTab(
+          onGoToAbonnement: _goToAbonnement,
+        );
       default: return const SizedBox.shrink();
     }
   }

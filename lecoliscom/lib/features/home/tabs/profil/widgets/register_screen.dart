@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import '../../../../../core/constants/app_colors.dart';
@@ -30,6 +29,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool    _loading    = false;
   bool    _acceptCGU  = false;
   String? _erreur;
+
+  // Indicatif téléphonique sélectionné
+  _Indicatif _indicatif = _kIndicatifs.firstWhere((i) => i.code == '+237');
 
   @override
   void dispose() {
@@ -65,7 +67,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     final ok = await widget.session.inscrire(
       pseudo:     _pseudoCtrl.text.trim(),
       email:      _emailCtrl.text.trim(),
-      telephone:  '+237${_telCtrl.text.trim()}',
+      telephone:  '${_indicatif.code}${_telCtrl.text.trim()}',
       motDePasse: _mdpCtrl.text.trim(),
     );
 
@@ -117,15 +119,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
           // Téléphone
           _Label('Numéro de téléphone'),
           const SizedBox(height: 6),
-          _Field(
-            controller:  _telCtrl,
-            hint:        '6XX XXX XXX',
-            icon:        Icons.phone_outlined,
-            keyboard:    TextInputType.phone,
-            prefixText:  '+237 ',
-            validator:   (v) {
+          _ChampTelephone(
+            controller: _telCtrl,
+            indicatif:  _indicatif,
+            onIndicatifChanged: (ind) => setState(() => _indicatif = ind),
+            validator: (v) {
               if (v == null || v.trim().isEmpty) return 'Numéro requis';
-              if (v.trim().replaceAll(' ', '').length < 8)
+              if (v.trim().replaceAll(' ', '').length < 6)
                 return 'Numéro invalide';
               return null;
             },
@@ -728,4 +728,388 @@ class _BoutonGradient extends StatelessWidget {
                   fontWeight: FontWeight.w700)),
     ),
   );
+}
+
+// ═════════════════════════════════════════════════════════
+// INDICATIFS TÉLÉPHONIQUES — monde entier (Afrique en tête)
+// ═════════════════════════════════════════════════════════
+
+class _Indicatif {
+  final String drapeau;
+  final String nom;
+  final String code;
+  const _Indicatif(this.drapeau, this.nom, this.code);
+}
+
+const List<_Indicatif> _kIndicatifs = [
+  // ── Afrique centrale ────────────────────────────────────
+  _Indicatif('🇨🇲', 'Cameroun',                    '+237'),
+  _Indicatif('🇨🇬', 'Congo',                        '+242'),
+  _Indicatif('🇨🇩', 'Congo (RDC)',                  '+243'),
+  _Indicatif('🇬🇦', 'Gabon',                        '+241'),
+  _Indicatif('🇹🇩', 'Tchad',                        '+235'),
+  _Indicatif('🇨🇫', 'Centrafrique',                 '+236'),
+  _Indicatif('🇬🇶', 'Guinée équatoriale',            '+240'),
+  // ── Afrique de l'Ouest ──────────────────────────────────
+  _Indicatif('🇸🇳', 'Sénégal',                      '+221'),
+  _Indicatif('🇨🇮', 'Côte d\'Ivoire',               '+225'),
+  _Indicatif('🇬🇭', 'Ghana',                        '+233'),
+  _Indicatif('🇳🇬', 'Nigeria',                      '+234'),
+  _Indicatif('🇲🇱', 'Mali',                         '+223'),
+  _Indicatif('🇧🇫', 'Burkina Faso',                 '+226'),
+  _Indicatif('🇧🇯', 'Bénin',                        '+229'),
+  _Indicatif('🇹🇬', 'Togo',                         '+228'),
+  _Indicatif('🇬🇳', 'Guinée',                       '+224'),
+  _Indicatif('🇬🇼', 'Guinée-Bissau',                '+245'),
+  _Indicatif('🇸🇱', 'Sierra Leone',                 '+232'),
+  _Indicatif('🇱🇷', 'Liberia',                      '+231'),
+  _Indicatif('🇳🇪', 'Niger',                        '+227'),
+  _Indicatif('🇲🇷', 'Mauritanie',                   '+222'),
+  _Indicatif('🇬🇲', 'Gambie',                       '+220'),
+  _Indicatif('🇨🇻', 'Cap-Vert',                     '+238'),
+  // ── Afrique du Nord ─────────────────────────────────────
+  _Indicatif('🇲🇦', 'Maroc',                        '+212'),
+  _Indicatif('🇩🇿', 'Algérie',                      '+213'),
+  _Indicatif('🇹🇳', 'Tunisie',                      '+216'),
+  _Indicatif('🇱🇾', 'Libye',                        '+218'),
+  _Indicatif('🇪🇬', 'Égypte',                       '+20'),
+  _Indicatif('🇸🇩', 'Soudan',                       '+249'),
+  // ── Afrique de l'Est ────────────────────────────────────
+  _Indicatif('🇪🇹', 'Éthiopie',                     '+251'),
+  _Indicatif('🇰🇪', 'Kenya',                        '+254'),
+  _Indicatif('🇹🇿', 'Tanzanie',                     '+255'),
+  _Indicatif('🇺🇬', 'Ouganda',                      '+256'),
+  _Indicatif('🇷🇼', 'Rwanda',                       '+250'),
+  _Indicatif('🇧🇮', 'Burundi',                      '+257'),
+  _Indicatif('🇩🇯', 'Djibouti',                     '+253'),
+  _Indicatif('🇸🇴', 'Somalie',                      '+252'),
+  _Indicatif('🇪🇷', 'Érythrée',                     '+291'),
+  _Indicatif('🇲🇬', 'Madagascar',                   '+261'),
+  _Indicatif('🇲🇿', 'Mozambique',                   '+258'),
+  _Indicatif('🇿🇲', 'Zambie',                       '+260'),
+  _Indicatif('🇲🇼', 'Malawi',                       '+265'),
+  _Indicatif('🇿🇼', 'Zimbabwe',                     '+263'),
+  _Indicatif('🇨🇴🇲', 'Comores',                    '+269'),
+  _Indicatif('🇸🇨', 'Seychelles',                   '+248'),
+  _Indicatif('🇲🇺', 'Maurice',                      '+230'),
+  // ── Afrique australe ────────────────────────────────────
+  _Indicatif('🇿🇦', 'Afrique du Sud',               '+27'),
+  _Indicatif('🇳🇦', 'Namibie',                      '+264'),
+  _Indicatif('🇧🇼', 'Botswana',                     '+267'),
+  _Indicatif('🇸🇿', 'Eswatini',                     '+268'),
+  _Indicatif('🇱🇸', 'Lesotho',                      '+266'),
+  _Indicatif('🇦🇴', 'Angola',                       '+244'),
+  // ── Europe ──────────────────────────────────────────────
+  _Indicatif('🇫🇷', 'France',                       '+33'),
+  _Indicatif('🇧🇪', 'Belgique',                     '+32'),
+  _Indicatif('🇨🇭', 'Suisse',                       '+41'),
+  _Indicatif('🇱🇺', 'Luxembourg',                   '+352'),
+  _Indicatif('🇩🇪', 'Allemagne',                    '+49'),
+  _Indicatif('🇬🇧', 'Royaume-Uni',                  '+44'),
+  _Indicatif('🇮🇹', 'Italie',                       '+39'),
+  _Indicatif('🇪🇸', 'Espagne',                      '+34'),
+  _Indicatif('🇵🇹', 'Portugal',                     '+351'),
+  _Indicatif('🇳🇱', 'Pays-Bas',                     '+31'),
+  _Indicatif('🇸🇪', 'Suède',                        '+46'),
+  _Indicatif('🇳🇴', 'Norvège',                      '+47'),
+  _Indicatif('🇩🇰', 'Danemark',                     '+45'),
+  _Indicatif('🇫🇮', 'Finlande',                     '+358'),
+  _Indicatif('🇵🇱', 'Pologne',                      '+48'),
+  _Indicatif('🇷🇴', 'Roumanie',                     '+40'),
+  _Indicatif('🇬🇷', 'Grèce',                        '+30'),
+  _Indicatif('🇨🇿', 'Tchéquie',                     '+420'),
+  _Indicatif('🇭🇺', 'Hongrie',                      '+36'),
+  _Indicatif('🇦🇹', 'Autriche',                     '+43'),
+  _Indicatif('🇷🇺', 'Russie',                       '+7'),
+  _Indicatif('🇺🇦', 'Ukraine',                      '+380'),
+  _Indicatif('🇹🇷', 'Turquie',                      '+90'),
+  // ── Amériques ───────────────────────────────────────────
+  _Indicatif('🇺🇸', 'États-Unis',                   '+1'),
+  _Indicatif('🇨🇦', 'Canada',                       '+1'),
+  _Indicatif('🇧🇷', 'Brésil',                       '+55'),
+  _Indicatif('🇲🇽', 'Mexique',                      '+52'),
+  _Indicatif('🇦🇷', 'Argentine',                    '+54'),
+  _Indicatif('🇨🇴', 'Colombie',                     '+57'),
+  _Indicatif('🇵🇪', 'Pérou',                        '+51'),
+  _Indicatif('🇨🇱', 'Chili',                        '+56'),
+  _Indicatif('🇻🇪', 'Venezuela',                    '+58'),
+  _Indicatif('🇪🇨', 'Équateur',                     '+593'),
+  _Indicatif('🇧🇴', 'Bolivie',                      '+591'),
+  _Indicatif('🇵🇾', 'Paraguay',                     '+595'),
+  _Indicatif('🇺🇾', 'Uruguay',                      '+598'),
+  _Indicatif('🇨🇺', 'Cuba',                         '+53'),
+  _Indicatif('🇭🇹', 'Haïti',                        '+509'),
+  _Indicatif('🇩🇴', 'Rép. dominicaine',             '+1'),
+  // ── Asie / Moyen-Orient ─────────────────────────────────
+  _Indicatif('🇨🇳', 'Chine',                        '+86'),
+  _Indicatif('🇯🇵', 'Japon',                        '+81'),
+  _Indicatif('🇰🇷', 'Corée du Sud',                 '+82'),
+  _Indicatif('🇮🇳', 'Inde',                         '+91'),
+  _Indicatif('🇵🇰', 'Pakistan',                     '+92'),
+  _Indicatif('🇧🇩', 'Bangladesh',                   '+880'),
+  _Indicatif('🇮🇩', 'Indonésie',                    '+62'),
+  _Indicatif('🇵🇭', 'Philippines',                  '+63'),
+  _Indicatif('🇻🇳', 'Vietnam',                      '+84'),
+  _Indicatif('🇹🇭', 'Thaïlande',                    '+66'),
+  _Indicatif('🇲🇾', 'Malaisie',                     '+60'),
+  _Indicatif('🇸🇬', 'Singapour',                    '+65'),
+  _Indicatif('🇦🇪', 'Émirats arabes unis',          '+971'),
+  _Indicatif('🇸🇦', 'Arabie saoudite',              '+966'),
+  _Indicatif('🇮🇷', 'Iran',                         '+98'),
+  _Indicatif('🇮🇶', 'Irak',                         '+964'),
+  _Indicatif('🇮🇱', 'Israël',                       '+972'),
+  _Indicatif('🇱🇧', 'Liban',                        '+961'),
+  _Indicatif('🇯🇴', 'Jordanie',                     '+962'),
+  _Indicatif('🇸🇾', 'Syrie',                        '+963'),
+  _Indicatif('🇶🇦', 'Qatar',                        '+974'),
+  _Indicatif('🇰🇼', 'Koweït',                       '+965'),
+  // ── Océanie ─────────────────────────────────────────────
+  _Indicatif('🇦🇺', 'Australie',                    '+61'),
+  _Indicatif('🇳🇿', 'Nouvelle-Zélande',             '+64'),
+];
+
+// ─────────────────────────────────────────────────────────
+// CHAMP TÉLÉPHONE avec sélecteur d'indicatif
+// ─────────────────────────────────────────────────────────
+class _ChampTelephone extends StatelessWidget {
+  final TextEditingController      controller;
+  final _Indicatif                 indicatif;
+  final ValueChanged<_Indicatif>   onIndicatifChanged;
+  final String? Function(String?)? validator;
+
+  const _ChampTelephone({
+    required this.controller,
+    required this.indicatif,
+    required this.onIndicatifChanged,
+    this.validator,
+  });
+
+  Future<void> _ouvrirSelecteur(BuildContext context) async {
+    final choix = await showModalBottomSheet<_Indicatif>(
+      context:            context,
+      isScrollControlled: true,
+      backgroundColor:    Colors.transparent,
+      builder:            (_) => _SelecteurIndicatif(selected: indicatif),
+    );
+    if (choix != null) onIndicatifChanged(choix);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TextFormField(
+      controller:   controller,
+      keyboardType: TextInputType.phone,
+      validator:    validator,
+      style: const TextStyle(color: AppColors.textPrimary, fontSize: 14),
+      decoration: InputDecoration(
+        hintText:  controller.text.isEmpty
+            ? (indicatif.code == '+237' ? '6XX XXX XXX' : 'Votre numéro') : null,
+        hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+        prefixIcon: GestureDetector(
+          onTap: () => _ouvrirSelecteur(context),
+          child: Container(
+            margin:  const EdgeInsets.only(left: 4, right: 0),
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(indicatif.drapeau, style: const TextStyle(fontSize: 18)),
+                const SizedBox(width: 6),
+                Text(
+                  indicatif.code,
+                  style: const TextStyle(
+                    color:      AppColors.textSecondary,
+                    fontSize:   13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                const Icon(Icons.expand_more_rounded,
+                    size: 14, color: AppColors.textMuted),
+              ],
+            ),
+          ),
+        ),
+        filled:      true,
+        fillColor:   AppColors.surface,
+        errorStyle:  const TextStyle(color: Color(0xFFFF5252), fontSize: 11),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: AppColors.divider)),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: AppColors.divider)),
+        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(
+                color: AppColors.primaryPink, width: 1.5)),
+        errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: Color(0xFFFF5252))),
+        contentPadding: const EdgeInsets.symmetric(
+            horizontal: 14, vertical: 13),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+// BOTTOM SHEET — sélecteur d'indicatif avec recherche
+// ─────────────────────────────────────────────────────────
+class _SelecteurIndicatif extends StatefulWidget {
+  final _Indicatif selected;
+  const _SelecteurIndicatif({required this.selected});
+
+  @override
+  State<_SelecteurIndicatif> createState() => _SelecteurIndicatifState();
+}
+
+class _SelecteurIndicatifState extends State<_SelecteurIndicatif> {
+  final _searchCtrl = TextEditingController();
+  List<_Indicatif> _filtered = _kIndicatifs;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchCtrl.addListener(_onSearch);
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  void _onSearch() {
+    final q = _searchCtrl.text.toLowerCase().trim();
+    setState(() {
+      _filtered = q.isEmpty
+          ? _kIndicatifs
+          : _kIndicatifs.where((i) =>
+              i.nom.toLowerCase().contains(q) ||
+              i.code.contains(q)).toList();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height:       MediaQuery.of(context).size.height * 0.75,
+      decoration: const BoxDecoration(
+        color:        AppColors.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: Column(
+        children: [
+          // Poignée
+          Container(
+            margin:     const EdgeInsets.only(top: 12, bottom: 8),
+            width: 36, height: 4,
+            decoration: BoxDecoration(
+              color:        AppColors.divider,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          // Titre
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+            child: Row(children: [
+              const Text(
+                'Indicatif pays',
+                style: TextStyle(
+                  fontSize:   16,
+                  fontWeight: FontWeight.w700,
+                  color:      AppColors.textPrimary,
+                ),
+              ),
+              const Spacer(),
+              GestureDetector(
+                onTap: () => Navigator.pop(context),
+                child: const Icon(Icons.close_rounded,
+                    size: 20, color: AppColors.textMuted),
+              ),
+            ]),
+          ),
+          // Barre de recherche
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+            child: Container(
+              height: 44,
+              decoration: BoxDecoration(
+                color:        AppColors.surfaceElevated,
+                borderRadius: BorderRadius.circular(12),
+                border:       Border.all(color: AppColors.divider),
+              ),
+              child: TextField(
+                controller: _searchCtrl,
+                style: const TextStyle(
+                    color: AppColors.textPrimary, fontSize: 13),
+                decoration: const InputDecoration(
+                  hintText:       'Rechercher un pays ou un code...',
+                  hintStyle:      TextStyle(
+                      color: AppColors.textMuted, fontSize: 13),
+                  prefixIcon:     Icon(Icons.search_rounded,
+                      size: 18, color: AppColors.textMuted),
+                  border:         InputBorder.none,
+                  contentPadding: EdgeInsets.symmetric(vertical: 12),
+                ),
+              ),
+            ),
+          ),
+          // Liste
+          Expanded(
+            child: ListView.builder(
+              itemCount: _filtered.length,
+              itemBuilder: (_, i) {
+                final ind = _filtered[i];
+                final sel = ind.code == widget.selected.code &&
+                            ind.nom  == widget.selected.nom;
+                return InkWell(
+                  onTap: () => Navigator.pop(context, ind),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 20, vertical: 13),
+                    color: sel
+                        ? AppColors.primaryPink.withOpacity(0.08)
+                        : Colors.transparent,
+                    child: Row(children: [
+                      Text(ind.drapeau,
+                          style: const TextStyle(fontSize: 20)),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Text(
+                          ind.nom,
+                          style: TextStyle(
+                            fontSize:   13,
+                            color:      sel
+                                ? AppColors.primaryPinkSoft
+                                : AppColors.textPrimary,
+                            fontWeight: sel
+                                ? FontWeight.w600
+                                : FontWeight.w400,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        ind.code,
+                        style: TextStyle(
+                          fontSize:   13,
+                          color:      sel
+                              ? AppColors.primaryPinkSoft
+                              : AppColors.textMuted,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      if (sel) ...[
+                        const SizedBox(width: 8),
+                        const Icon(Icons.check_circle_rounded,
+                            size: 16, color: AppColors.primaryPink),
+                      ],
+                    ]),
+                  ),
+                );
+              },
+            ),
+          ),
+          SizedBox(height: MediaQuery.of(context).padding.bottom + 8),
+        ],
+      ),
+    );
+  }
 }

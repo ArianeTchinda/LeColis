@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
 
-/// Étoile individuelle avec animation de scintillement
+// Étoile individuelle avec animation de scintillement
 class _Star {
   final double x;       // 0..1 relatif à la largeur
   final double y;       // 0..1 relatif à la hauteur

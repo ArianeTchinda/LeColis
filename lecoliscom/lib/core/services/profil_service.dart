@@ -7,9 +7,46 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import '../constants/api_constants.dart';
 import '../models/abonnement_model.dart';
 import '../models/publication_model.dart';
+
+
+// ─────────────────────────────────────────────────────────
+// Modèle de Statistiques d'une Publication
+// ─────────────────────────────────────────────────────────
+class PublicationStats {
+  final int vuesTotal;
+  final int totalAvis;
+  final double noteMoyenne;
+  final Map<String, int> evolutionAvis;
+
+  const PublicationStats({
+    required this.vuesTotal,
+    required this.totalAvis,
+    required this.noteMoyenne,
+    required this.evolutionAvis,
+  });
+
+  factory PublicationStats.fromJson(Map<String, dynamic> json) {
+    // Sécurise la récupération de l'objet imbriqué du backend
+    final evolution = json['evolutionAvis'] as Map<String, dynamic>? ?? {};
+    
+    return PublicationStats(
+      // Supporte 'vuesTotal' tout en gérant l'ancienne clé avec faute de frappe 'vuesTotatles' par sécurité
+      vuesTotal:   json['vuesTotal'] ?? json['vuesTotatles'] ?? 0,
+      totalAvis:   json['totalAvis'] ?? 0,
+      noteMoyenne: (json['noteMoyenne'] as num? ?? 0.0).toDouble(),
+      evolutionAvis: {
+        'jour':    (evolution['parJour']    as num? ?? 0).toInt(),
+        'semaine': (evolution['parSemaine'] as num? ?? 0).toInt(),
+        'mois':    (evolution['parMois']    as num? ?? 0).toInt(),
+        'an':      (evolution['parAn']      as num? ?? 0).toInt(),
+      },
+    );
+  }
+}
 
 // ─────────────────────────────────────────────────────────
 // Modèle notification (aligné sur le controller backend)
@@ -163,6 +200,36 @@ class ProfilService {
   // PUBLICATIONS (côté profil)
   // ══════════════════════════════════════════════════════
 
+  /// GET /profil/publications/:id — détail d'une publication (authentifié)
+  Future<PublicationModel> getPublicationById(String id) async {
+    final res = await http.get(
+      Uri.parse('${ApiConstants.profilPublications}/$id'),
+      headers: _headers,
+    ).timeout(const Duration(seconds: 10));
+
+    if (res.statusCode == 200) {
+      return PublicationModel.fromJson(
+          jsonDecode(res.body) as Map<String, dynamic>);
+    }
+    throw Exception('Publication introuvable (${res.statusCode})');
+  }
+
+  // À AJOUTER ICI : Récupération des statistiques depuis le backend
+  /// GET /profil/publications/:id/stats — statistiques complètes et avis
+  Future<PublicationStats> getPublicationStats(String id) async {
+    final res = await http.get(
+      Uri.parse(ApiConstants.profilPublicationStats(id)),
+      headers: _headers,
+    ).timeout(const Duration(seconds: 10));
+
+    if (res.statusCode == 200) {
+      return PublicationStats.fromJson(
+        jsonDecode(res.body) as Map<String, dynamic>,
+      );
+    }
+    throw Exception('Impossible de charger les statistiques (${res.statusCode})');
+  }
+
   /// GET /profil/publications — mes publications
   Future<List<PublicationModel>> getMesPublications() async {
     final res = await http.get(
@@ -226,7 +293,8 @@ class ProfilService {
       request.files.add(http.MultipartFile.fromBytes(
         'images',
         images[i],
-        filename: 'image_$i.jpg',
+        filename: 'image_$i.png',
+        contentType: MediaType('image', 'png'),
       ));
     }
 
@@ -241,28 +309,36 @@ class ProfilService {
   }
 
   /// PUT /profil/publications/:id — modifier une publication
+  /// [imagesToDelete] : liste des IDs Prisma des images à supprimer (MinIO + BD).
+  ///   - Toujours inclus dans le body, même vide, pour que le backend sache
+  ///     qu'il n'y a rien à supprimer (évite un null check côté JS).
   Future<PublicationModel> modifierPublication(
     String pubId, {
-    String?      titre,
-    String?      description,
-    bool?        estDisponible,
-    double?      tarif,
-    String?      quartierId,
-    String?      villeNom,
-    String?      regionNom,
-    String?      paysNom,
+    String?       titre,
+    String?       description,
+    bool?         estDisponible,
+    String?       statut,
+    double?       tarif,
+    String?       quartierId,
+    String?       villeNom,
+    String?       regionNom,
+    String?       paysNom,
     List<String>? categorieIds,
+    List<String>  imagesToDelete = const [],  // ← optionnel, défaut liste vide
   }) async {
     final body = <String, dynamic>{
-      if (titre        != null) 'titre':        titre,
-      if (description  != null) 'description':  description,
-      if (estDisponible!= null) 'estDisponible': estDisponible,
-      if (tarif        != null) 'tarif':         tarif,
-      if (quartierId   != null) 'quartierId':    quartierId,
-      if (villeNom     != null) 'villeNom':      villeNom,
-      if (regionNom    != null) 'regionNom':     regionNom,
-      if (paysNom      != null) 'paysNom':       paysNom,
-      if (categorieIds != null) 'categorieIds':  categorieIds,
+      if (titre         != null) 'titre':         titre,
+      if (description   != null) 'description':   description,
+      if (estDisponible != null) 'estDisponible':  estDisponible,
+      if (statut        != null) 'statut':         statut,
+      if (tarif         != null) 'tarif':          tarif,
+      if (quartierId    != null) 'quartierId':     quartierId,
+      if (villeNom      != null) 'villeNom':       villeNom,
+      if (regionNom     != null) 'regionNom':      regionNom,
+      if (paysNom       != null) 'paysNom':        paysNom,
+      if (categorieIds  != null) 'categorieIds':   categorieIds,
+      // Toujours envoyé — le backend lit imagesToDelete pour supprimer dans MinIO + BD
+      'imagesToDelete': imagesToDelete,
     };
 
     final res = await http.put(
@@ -307,15 +383,22 @@ class ProfilService {
   // PROFIL (infos personnelles)
   // ══════════════════════════════════════════════════════
 
-  /// PUT /profil — modifier pseudo et/ou téléphone
+  /// PUT /profil — modifier pseudo, téléphone et/ou email
   Future<void> updateProfil({
-    required String pseudo,
-    required String telephone,
+    String? pseudo,
+    String? telephone,
+    String? email,
   }) async {
+    final body = <String, dynamic>{
+      if (pseudo    != null) 'pseudo':    pseudo,
+      if (telephone != null) 'telephone': telephone,
+      if (email     != null) 'email':     email,
+    };
+
     final res = await http.put(
       Uri.parse(ApiConstants.profil),
       headers: _headers,
-      body:    jsonEncode({'pseudo': pseudo, 'telephone': telephone}),
+      body:    jsonEncode(body),
     ).timeout(const Duration(seconds: 10));
 
     if (res.statusCode != 200) {
@@ -334,6 +417,7 @@ class ProfilService {
         'photo',
         imageBytes,
         filename: fileName,
+        contentType: MediaType('image', 'png'),
       ));
 
     final streamed = await request.send().timeout(const Duration(seconds: 30));
@@ -534,6 +618,33 @@ class ProfilService {
   }
 
   /// POST /abonnements/souscrire (authentifié)
+  // ── Stats par publication ───────────────────────────────
+  Future<PubStats> statsPublication(String pubId) async {
+    final res = await http.get(
+      Uri.parse('${ApiConstants.profilPublications}/$pubId/stats'),
+      headers: _headers,
+    ).timeout(const Duration(seconds: 10));
+
+    if (res.statusCode == 200) {
+      return PubStats.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+    }
+    throw Exception('Erreur stats publication (${res.statusCode})');
+  }
+
+  // ── Avis d'une publication ───────────────────────────────
+  Future<List<AvisPub>> avisPublication(String pubId) async {
+    final res = await http.get(
+      Uri.parse('${ApiConstants.profilPublications}/$pubId/avis'),
+      headers: _headers,
+    ).timeout(const Duration(seconds: 10));
+
+    if (res.statusCode == 200) {
+      final list = jsonDecode(res.body) as List;
+      return list.map((j) => AvisPub.fromJson(j)).toList();
+    }
+    throw Exception('Erreur avis publication (${res.statusCode})');
+  }
+
   Future<void> souscrire(
       String planId, String methodePaiement) async {
     final res = await http.post(
@@ -546,5 +657,230 @@ class ProfilService {
       final body = jsonDecode(res.body);
       throw Exception(body['message'] ?? 'Erreur souscription');
     }
+  }
+
+  Future<void> supprimerCompte() async {
+  final response = await http
+      .delete(
+        Uri.parse('${ApiConstants.baseUrl}/profil/compte'),
+        headers: _headers,
+      )
+      .timeout(const Duration(seconds: 10));
+  if (response.statusCode != 200) {
+    throw Exception('Impossible de supprimer le compte.');
+  }
+}
+}
+
+// ══════════════════════════════════════════════════════════
+// EXTENSION — UPSERT LOCALISATION (méthodes statiques)
+// ══════════════════════════════════════════════════════════
+// Séparées en extension pour ne pas modifier la classe existante.
+// Usage : ProfilServiceUpsert.upsertPays(token, nom: 'Sénégal')
+extension ProfilServiceUpsert on ProfilService {
+
+  // Helper interne : headers avec token
+  static Map<String, String> _authHeaders(String token) => {
+    'Content-Type':  'application/json',
+    'Authorization': 'Bearer $token',
+  };
+
+  /// POST /localisation/pays
+  /// "Créer si absent, retourner si existant" (déduplication côté backend).
+  /// [drapeau] est optionnel — le backend utilise '🌍' par défaut.
+  static Future<PaysRef> upsertPays(
+    String token, {
+    required String nom,
+    String drapeau = '🌍',
+  }) async {
+    final res = await http.post(
+      Uri.parse(ApiConstants.localisationPays),
+      headers: _authHeaders(token),
+      body:    jsonEncode({'nom': nom, 'drapeau': drapeau}),
+    ).timeout(const Duration(seconds: 10));
+
+    if (res.statusCode == 200 || res.statusCode == 201) {
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      return PaysRef.fromJson(body['pays'] as Map<String, dynamic>);
+    }
+    final err = jsonDecode(res.body);
+    throw Exception(err['message'] ?? 'Erreur upsert pays (${res.statusCode})');
+  }
+
+  /// POST /localisation/regions
+  /// Le pays parent doit exister en BD (ou avoir été upsert juste avant).
+  static Future<RegionRef> upsertRegion(
+    String token, {
+    required String nom,
+    required String paysNom,
+  }) async {
+    final res = await http.post(
+      Uri.parse(ApiConstants.localisationRegions),
+      headers: _authHeaders(token),
+      body:    jsonEncode({'nom': nom, 'paysNom': paysNom}),
+    ).timeout(const Duration(seconds: 10));
+
+    if (res.statusCode == 200 || res.statusCode == 201) {
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      return RegionRef.fromJson(body['region'] as Map<String, dynamic>);
+    }
+    final err = jsonDecode(res.body);
+    throw Exception(err['message'] ?? 'Erreur upsert région (${res.statusCode})');
+  }
+
+  /// POST /localisation/villes
+  static Future<VilleRef> upsertVille(
+    String token, {
+    required String nom,
+    required String regionNom,
+    required String paysNom,
+  }) async {
+    final res = await http.post(
+      Uri.parse(ApiConstants.localisationVilles),
+      headers: _authHeaders(token),
+      body:    jsonEncode({'nom': nom, 'regionNom': regionNom, 'paysNom': paysNom}),
+    ).timeout(const Duration(seconds: 10));
+
+    if (res.statusCode == 200 || res.statusCode == 201) {
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      return VilleRef.fromJson(body['ville'] as Map<String, dynamic>);
+    }
+    final err = jsonDecode(res.body);
+    throw Exception(err['message'] ?? 'Erreur upsert ville (${res.statusCode})');
+  }
+
+  /// POST /localisation/quartiers
+  /// Toute la chaîne parent doit exister (ou avoir été upsert en cascade).
+  static Future<QuartierRef> upsertQuartier(
+    String token, {
+    required String nom,
+    required String villeNom,
+    required String regionNom,
+    required String paysNom,
+  }) async {
+    final res = await http.post(
+      Uri.parse(ApiConstants.localisationQuartiers),
+      headers: _authHeaders(token),
+      body:    jsonEncode({
+        'nom':       nom,
+        'villeNom':  villeNom,
+        'regionNom': regionNom,
+        'paysNom':   paysNom,
+      }),
+    ).timeout(const Duration(seconds: 10));
+
+    if (res.statusCode == 200 || res.statusCode == 201) {
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      return QuartierRef.fromJson(body['quartier'] as Map<String, dynamic>);
+    }
+    final err = jsonDecode(res.body);
+    throw Exception(err['message'] ?? 'Erreur upsert quartier (${res.statusCode})');
+  }
+}
+// ═══════════════════════════════════════════════════════════
+// MODÈLES STATS PAR PUBLICATION
+// ═══════════════════════════════════════════════════════════
+
+/// Un point de série temporelle : label + vues + avis
+class PeriodePoint {
+  final String label;   // ex: "Lun", "Jan", "2024"
+  final int    vues;
+  final int    avis;
+
+  const PeriodePoint({
+    required this.label,
+    required this.vues,
+    required this.avis,
+  });
+
+  factory PeriodePoint.fromJson(Map<String, dynamic> j) => PeriodePoint(
+    label: j['label']?.toString() ?? '',
+    vues:  (j['vues']  as num? ?? 0).toInt(),
+    avis:  (j['avis']  as num? ?? 0).toInt(),
+  );
+}
+
+/// Stats complètes d'une publication
+class PubStats {
+  final int               vuesTotal;
+  final int               avisTotal;
+  final double            noteMoyenne;
+  final List<PeriodePoint> parJour;
+  final List<PeriodePoint> parSemaine;
+  final List<PeriodePoint> parMois;
+  final List<PeriodePoint> parAn;
+
+  const PubStats({
+    required this.vuesTotal,
+    required this.avisTotal,
+    required this.noteMoyenne,
+    required this.parJour,
+    required this.parSemaine,
+    required this.parMois,
+    required this.parAn,
+  });
+
+  factory PubStats.fromJson(Map<String, dynamic> j) {
+    List<PeriodePoint> _parse(dynamic raw) {
+      if (raw == null) return [];
+      return (raw as List).map((e) =>
+          PeriodePoint.fromJson(e as Map<String, dynamic>)).toList();
+    }
+
+    return PubStats(
+      vuesTotal:   (j['vuesTotal']   as num? ?? 0).toInt(),
+      avisTotal:   (j['avisTotal']   as num? ?? 0).toInt(),
+      noteMoyenne: (j['noteMoyenne'] as num? ?? 0).toDouble(),
+      parJour:     _parse(j['parJour']),
+      parSemaine:  _parse(j['parSemaine']),
+      parMois:     _parse(j['parMois']),
+      parAn:       _parse(j['parAn']),
+    );
+  }
+}
+
+/// Un avis sur une publication
+class AvisPub {
+  final String   id;
+  final int      note;       // 1–5
+  final String   message;
+  final DateTime createdAt;
+
+  const AvisPub({
+    required this.id,
+    required this.note,
+    required this.message,
+    required this.createdAt,
+  });
+
+  factory AvisPub.fromJson(Map<String, dynamic> j) => AvisPub(
+    id:        j['id']?.toString() ?? '',
+    note:      (j['note'] as num? ?? 0).toInt(),
+    message:   j['message']?.toString() ?? '',
+    createdAt: DateTime.tryParse(j['createdAt']?.toString() ?? '') ?? DateTime.now(),
+  );
+
+  /// Label textuel de la note
+  String get noteLabel {
+    switch (note) {
+      case 5: return 'Excellent';
+      case 4: return 'Très bien';
+      case 3: return 'Bien';
+      case 2: return 'Passable';
+      case 1: return 'Mauvais';
+      default: return '';
+    }
+  }
+
+  /// Date formatée lisible
+  String get dateFormatee {
+    final now  = DateTime.now();
+    final diff = now.difference(createdAt);
+    if (diff.inMinutes < 60)  return 'Il y a ${diff.inMinutes} min';
+    if (diff.inHours   < 24)  return 'Il y a ${diff.inHours} h';
+    if (diff.inDays    < 7)   return 'Il y a ${diff.inDays} j';
+    if (diff.inDays    < 30)  return 'Il y a ${(diff.inDays / 7).round()} sem.';
+    if (diff.inDays    < 365) return 'Il y a ${(diff.inDays / 30).round()} mois';
+    return 'Il y a ${(diff.inDays / 365).round()} an(s)';
   }
 }

@@ -1,6 +1,9 @@
 // lib/core/models/publication_model.dart
 
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import '../constants/api_constants.dart';
 
 enum PlanType { premium, standard, basique }
 
@@ -30,76 +33,116 @@ extension PlanTypeExt on PlanType {
   }
 }
 
+// ─────────────────────────────────────────────────────────
+// IMAGE — transporte id + url pour permettre la suppression
+// ─────────────────────────────────────────────────────────
+class ImagePub {
+  final String id;
+  final String url;  // URL proxifiée côté Flutter
+  const ImagePub({required this.id, required this.url});
+}
+
 class PublicationModel {
-  final String id;           // ← String (cuid Prisma, pas int)
+  final String id;
   final String escortPseudo;
   final String escortImageProfil;
   final List<String> imageUrls;
+  final List<ImagePub> imageItems;
   final String titre;
   final String description;
+  
   final String categorie;
+  final List<String> categories;
 
-  // ── Localisation hiérarchique ──
+  // Localisation
   final String pays;
   final String region;
   final String ville;
   final String quartier;
 
-  // ── Contacts ──
-  final String  telephone;
-  final String  whatsapp;
+  // Contacts
+  final String telephone;
+  final String whatsapp;
   final String? email;
 
   final PlanType planType;
-  final bool     estVerifie;
+  final String planTypeString;        // ← Plus important maintenant
+  final Color planColor;
+  final Color planBgColor;
 
-  /// [estDisponible] indique si l'escort se déclare disponible pour des RDV.
-  /// Ce champ est INDÉPENDANT de la visibilité de la publication.
-  /// La visibilité est dictée uniquement par [dateExpiration].
+  final bool estVerifie;
   final bool estDisponible;
+  final String statutBackend;
 
-  final double?  tarif;
+  final double? tarif;
   final DateTime dateExpiration;
-  final int      vues;
+  final DateTime createdAt;
+  final int vues;
 
-  // ── Avis ──
   final List<AvisModel> avis;
+  final int nbAvis;
+  final double noteMoyenne;
 
-  const PublicationModel({
+  PublicationModel({
     required this.id,
     required this.escortPseudo,
     required this.escortImageProfil,
     required this.imageUrls,
+    required this.imageItems,
     required this.titre,
     required this.description,
     required this.categorie,
-    this.pays     = 'Cameroun',
-    this.region   = '',
+    required this.categories,
+    this.pays = 'Cameroun',
+    this.region = '',
     required this.ville,
     required this.quartier,
     required this.telephone,
     required this.whatsapp,
     this.email,
     required this.planType,
+    required this.planTypeString,
     required this.estVerifie,
     required this.estDisponible,
+    this.statutBackend = 'ACTIVE',
     required this.tarif,
     required this.dateExpiration,
+    required this.createdAt,
     required this.vues,
     this.avis = const [],
-  });
+    this.nbAvis = 0,
+    this.noteMoyenne = 0.0,
+    Color? planColor,
+    Color? planBgColor,
+  })  : planColor   = planColor   ?? _defaultPlanColor(planType),
+        planBgColor = planBgColor ?? _defaultPlanBgColor(planType);
 
-  /// Image principale (vignette carte)
+  static Color _defaultPlanColor(PlanType t) {
+    switch (t) {
+      case PlanType.premium:  return const Color(0xFFFFD700);
+      case PlanType.standard: return const Color(0xFFFF5DA8);
+      case PlanType.basique:  return const Color(0xFF8A8A9A);
+      default:                return const Color(0xFF8A8A9A);
+    }
+  }
+
+  static Color _defaultPlanBgColor(PlanType t) {
+    switch (t) {
+      case PlanType.premium:  return const Color(0x22FFD700);
+      case PlanType.standard: return const Color(0x22FF5DA8);
+      case PlanType.basique:  return const Color(0x228A8A9A);
+      default:                return const Color(0x228A8A9A);
+    }
+  }
+
   String get imageUrl => imageUrls.isNotEmpty ? imageUrls.first : '';
 
-  /// Visible uniquement si l'abonnement est encore actif
   bool get estActive => dateExpiration.isAfter(DateTime.now());
 
-  /// Localisation affichable compacte
   String get localisationLabel {
     final parts = <String>[];
     if (quartier.isNotEmpty) parts.add(quartier);
-    if (ville.isNotEmpty)    parts.add(ville);
+    if (ville.isNotEmpty) parts.add(ville);
     return parts.join(', ');
   }
 
@@ -108,74 +151,113 @@ class PublicationModel {
       case PlanType.premium:  return 3;
       case PlanType.standard: return 2;
       case PlanType.basique:  return 1;
+      default: return 1;
     }
   }
 
-  /// Construit depuis la réponse JSON du backend (GET /publications ou GET /publications/:id)
-  /// Structure backend : { id, titre, description, estDisponible, tarif, statut,
-  ///   vues, dateExpiration, planType, villeNom, regionNom, paysNom,
-  ///   quartier:{nom}, images:[{url}], categories:[{nom}],
-  ///   escort:{pseudo, photoUrl, telephone, email, estVerifie},
-  ///   avis:[{id, note, message, createdAt}] }
+  // ─────────────────────────────────────────────────────────
   factory PublicationModel.fromJson(Map<String, dynamic> j) {
     // Images
-    final images   = (j['images'] as List?) ?? [];
-    final imageUrls = images.map<String>((img) => img['url'] as String).toList();
+    final imagesRaw = (j['images'] as List?) ?? [];
+    final imageItems = imagesRaw.map<ImagePub>((img) {
+      final id = img['id'] as String? ?? '';
+      final rawUrl = img['url'] as String? ?? '';
+      final proxied = rawUrl.isNotEmpty
+          ? '${ApiConstants.baseUrl}/proxy-image?url=${Uri.encodeComponent(rawUrl)}'
+          : '';
+      return ImagePub(id: id, url: proxied);
+    }).toList();
 
-    // Catégorie principale (première de la liste)
-    final cats       = (j['categories'] as List?) ?? [];
-    final categorie  = cats.isNotEmpty ? (cats.first['nom'] ?? '') : '';
+    final imageUrls = imageItems.map((i) => i.url).toList();
 
     // Escort
     final escort = j['escort'] as Map<String, dynamic>? ?? {};
+    final rawPhoto = escort['photoUrl'] as String?;
+    final escortImageProfil = rawPhoto != null && rawPhoto.isNotEmpty
+        ? '${ApiConstants.baseUrl}/proxy-image?url=${Uri.encodeComponent(rawPhoto)}'
+        : '';
+
+    // Catégories
+    final catsRaw = (j['categories'] as List?) ?? [];
+    final categoriesList = catsRaw
+        .map<String>((c) => (c['nom'] as String?)?.trim() ?? '')
+        .where((nom) => nom.isNotEmpty)
+        .toList();
+
+    final categoriePrincipale = categoriesList.isNotEmpty 
+        ? categoriesList.first 
+        : (j['categorie'] ?? '');
 
     // Avis
     final avisRaw = (j['avis'] as List?) ?? [];
-    final avis    = avisRaw.map((a) => AvisModel.fromJson(a, j['id'])).toList();
+    final avis = avisRaw.map((a) => AvisModel.fromJson(a, j['id']?.toString() ?? '')).toList();
 
-    // PlanType
-    PlanType parsePlanType(String? s) {
-      switch ((s ?? '').toLowerCase()) {
-        case 'premium':  return PlanType.premium;
-        case 'standard': return PlanType.standard;
-        default:         return PlanType.basique;
-      }
+    // ── PLAN LOGIC (Correction principale) ─────────────────
+    String planStr = (j['planType'] ?? 
+                     j['plan']?['nom'] ?? 
+                     j['planNom'] ?? 
+                     'basique').toString().toLowerCase();
+
+    PlanType parsePlanType(String str) {
+      if (str.contains('premium')) return PlanType.premium;
+      if (str.contains('standard')) return PlanType.standard;
+      return PlanType.basique;
+    }
+
+    final pt = parsePlanType(planStr);
+
+    // Couleur depuis le backend (prioritaire)
+    Color? planColorFromBackend;
+    final accentHex = j['accentColor'] ?? j['plan']?['accentColor'];
+    if (accentHex != null && accentHex.toString().isNotEmpty) {
+      try {
+        final h = accentHex.toString().replaceAll('#', '');
+        planColorFromBackend = Color(int.parse('FF$h', radix: 16));
+      } catch (_) {}
     }
 
     return PublicationModel(
-      id:                 j['id'],
-      escortPseudo:       escort['pseudo']   ?? '',
-      escortImageProfil:  escort['photoUrl'] ?? '',
+      id:                 j['id']?.toString() ?? '',
+      escortPseudo:       escort['pseudo'] ?? '',
+      escortImageProfil:  escortImageProfil,
       imageUrls:          imageUrls,
-      titre:              j['titre']         ?? '',
-      description:        j['description']   ?? '',
-      categorie:          categorie,
-      pays:               j['paysNom']       ?? 'Cameroun',
-      region:             j['regionNom']     ?? '',
-      ville:              j['villeNom']      ?? '',
-      quartier:           j['quartier']?['nom'] ?? '',
+      imageItems:         imageItems,
+      titre:              j['titre'] ?? '',
+      description:        j['description'] ?? '',
+      categorie:          categoriePrincipale,
+      categories:         categoriesList,
+      pays:               j['paysNom'] ?? 'Cameroun',
+      region:             j['regionNom'] ?? '',
+      ville:              j['villeNom'] ?? '',
+      quartier:           j['quartier']?['nom'] ?? j['quartier'] ?? '',
       telephone:          escort['telephone'] ?? '',
-      whatsapp:           escort['whatsapp']  ?? escort['telephone'] ?? '',
+      whatsapp:           escort['whatsapp'] ?? escort['telephone'] ?? '',
       email:              escort['email'],
-      planType:           parsePlanType(j['planType']),
+      planType:           pt,
+      planTypeString:     planStr,                    // ← Très important
+      planColor:          planColorFromBackend,
       estVerifie:         escort['estVerifie'] ?? false,
-      estDisponible:      j['estDisponible']   ?? false,
+      estDisponible:      j['estDisponible'] ?? true,
+      statutBackend:      j['statut'] ?? 'ACTIVE',
       tarif:              (j['tarif'] as num?)?.toDouble(),
-      dateExpiration:     DateTime.parse(j['dateExpiration']),
-      vues:               j['vues'] ?? 0,
+      dateExpiration:     DateTime.tryParse(j['dateExpiration'] ?? '') ?? DateTime.now(),
+      createdAt:          DateTime.tryParse(j['createdAt'] ?? '') ?? DateTime.now(),
+      vues:               (j['vues'] as num?)?.toInt() ?? 0,
       avis:               avis,
+      nbAvis:             (j['nbAvis'] as num? ?? 0).toInt(),
+      noteMoyenne:        (j['noteMoyenne'] as num? ?? 0.0).toDouble(),
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────
-// AVIS ANONYME
+// AVIS
 // ─────────────────────────────────────────────────────────
 class AvisModel {
-  final String   id;
-  final String   publicationId;
-  final int      note;
-  final String   message;
+  final String id;
+  final String publicationId;
+  final int note;
+  final String message;
   final DateTime createdAt;
 
   const AvisModel({
@@ -186,13 +268,12 @@ class AvisModel {
     required this.createdAt,
   });
 
-  factory AvisModel.fromJson(Map<String, dynamic> j, String pubId) =>
-      AvisModel(
+  factory AvisModel.fromJson(Map<String, dynamic> j, String pubId) => AvisModel(
         id:            j['id']?.toString() ?? '',
         publicationId: pubId,
         note:          j['note'] ?? 0,
         message:       j['message'] ?? '',
-        createdAt:     DateTime.parse(j['createdAt']),
+        createdAt:     DateTime.parse(j['createdAt'] ?? DateTime.now().toIso8601String()),
       );
 }
 
@@ -215,74 +296,9 @@ enum SignalementMotif {
   }
 }
 
-// ─────────────────────────────────────────────────────────
-// DONNÉES MOCK (conservées pour les tests hors-réseau)
-// ─────────────────────────────────────────────────────────
-final List<PublicationModel> mockPublications = [
-  PublicationModel(
-    id: 'mock_1',
-    escortPseudo: 'Sofia K.',
-    escortImageProfil: 'https://randomuser.me/api/portraits/women/11.jpg',
-    imageUrls: [
-      'https://picsum.photos/seed/s1a/800/600',
-      'https://picsum.photos/seed/s1b/800/600',
-    ],
-    titre: 'Moment de détente et douceur',
-    description: 'Je propose des moments de qualité dans un cadre discret et chaleureux.',
-    categorie: 'Milf',
-    pays: 'Cameroun', region: 'Centre',
-    ville: 'Yaoundé', quartier: 'Bastos',
-    telephone: '+237600000001', whatsapp: '+237600000001',
-    email: 'sofia.k@proton.me',
-    planType: PlanType.premium,
-    estVerifie: true, estDisponible: true,
-    tarif: 50000,
-    dateExpiration: DateTime.now().add(const Duration(days: 20)),
-    vues: 340,
-  ),
-  PublicationModel(
-    id: 'mock_2',
-    escortPseudo: 'Naomi B.',
-    escortImageProfil: 'https://randomuser.me/api/portraits/women/22.jpg',
-    imageUrls: [
-      'https://picsum.photos/seed/s2a/800/600',
-      'https://picsum.photos/seed/s2b/800/600',
-    ],
-    titre: 'Élégance et complicité',
-    description: 'Belle et raffinée, je vous propose une expérience inoubliable.',
-    categorie: 'Ebony',
-    pays: 'Cameroun', region: 'Littoral',
-    ville: 'Douala', quartier: 'Bonanjo',
-    telephone: '+237600000002', whatsapp: '+237600000002',
-    email: 'naomi.b@proton.me',
-    planType: PlanType.premium,
-    estVerifie: true, estDisponible: true,
-    tarif: 45000,
-    dateExpiration: DateTime.now().add(const Duration(days: 15)),
-    vues: 280,
-  ),
-  PublicationModel(
-    id: 'mock_3',
-    escortPseudo: 'Bella R.',
-    escortImageProfil: 'https://randomuser.me/api/portraits/women/33.jpg',
-    imageUrls: ['https://picsum.photos/seed/s3a/800/600'],
-    titre: 'Disponible ce soir',
-    description: 'Jeune femme dynamique, douce et attentionnée.',
-    categorie: 'Latina',
-    pays: 'Cameroun', region: 'Centre',
-    ville: 'Yaoundé', quartier: 'Nlongkak',
-    telephone: '+237600000003', whatsapp: '+237600000003',
-    planType: PlanType.standard,
-    estVerifie: true, estDisponible: true,
-    tarif: 30000,
-    dateExpiration: DateTime.now().add(const Duration(days: 5)),
-    vues: 120,
-  ),
-];
 
-// ─────────────────────────────────────────────────────────
-// LISTES FILTRE (statiques — remplacées dynamiquement par le référentiel)
-// ─────────────────────────────────────────────────────────
+
+// Liste statique (à remplacer par le référentiel plus tard)
 const List<String> categoriesStatiques = [
   'Toutes', 'Milf', 'BBW', 'Ebony', 'Latina', 'Asian', 'Trans', 'Couple',
 ];
@@ -291,14 +307,20 @@ const List<String> villesStatiques = [
   'Toutes', 'Yaoundé', 'Douala', 'Bafoussam', 'Garoua', 'Maroua',
 ];
 
-// ─────────────────────────────────────────────────────────
-// AVIS MOCK
-// ─────────────────────────────────────────────────────────
+// Avis mock
 final List<AvisModel> mockAvis = [
-  AvisModel(id: '1', publicationId: 'mock_1', note: 5,
-      message: 'Très discrète et ponctuelle.',
-      createdAt: DateTime.now().subtract(const Duration(days: 3))),
-  AvisModel(id: '2', publicationId: 'mock_1', note: 4,
-      message: 'Super expérience, cadre agréable.',
-      createdAt: DateTime.now().subtract(const Duration(days: 7))),
+  AvisModel(
+    id: '1',
+    publicationId: 'mock_1',
+    note: 5,
+    message: 'Très discrète et ponctuelle.',
+    createdAt: DateTime.now().subtract(const Duration(days: 3)),
+  ),
+  AvisModel(
+    id: '2',
+    publicationId: 'mock_1',
+    note: 4,
+    message: 'Super expérience, cadre agréable.',
+    createdAt: DateTime.now().subtract(const Duration(days: 7)),
+  ),
 ];

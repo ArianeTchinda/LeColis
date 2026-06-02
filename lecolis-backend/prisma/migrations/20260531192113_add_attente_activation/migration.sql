@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "StatutAbonnement" ADD VALUE 'ATTENTE_ACTIVATION';

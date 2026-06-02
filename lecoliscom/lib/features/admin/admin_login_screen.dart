@@ -55,7 +55,8 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
       );
     } else {
       setState(() {
-        _erreur  = 'Identifiants incorrects.';
+        // On récupère le message d'erreur spécifique renvoyé par l'API
+        _erreur  = _session.erreur ?? 'Identifiants incorrects.';
         _loading = false;
       });
     }
